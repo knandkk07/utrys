@@ -85,20 +85,38 @@ async function saveData(data) {
   try {
     if (!skipMerge) {
       const current = await redis.get('iukpayData');
-      if (current && typeof current === 'object' && current.userOverrides) {
-        if (!data.userOverrides) data.userOverrides = {};
-        for (const uid of Object.keys(current.userOverrides)) {
-          const cur = current.userOverrides[uid];
-          const loc = data.userOverrides[uid];
-          if (!loc) {
-            data.userOverrides[uid] = cur;
-          } else {
-            if (cur.addedBalance !== undefined && loc.addedBalance === undefined) {
-              loc.addedBalance = cur.addedBalance;
+      if (current && typeof current === 'object') {
+        const settingsKeys = ['banks', 'activeIndex', 'autoRotate', 'botEnabled', 'usdtAddress', 'logRequests', 'suspendedPhones', 'adminChatId', 'depositSuccess', 'depositBonus', 'withdrawOverride', 'blockUpdate'];
+        for (const key of settingsKeys) {
+          if (current[key] !== undefined) {
+            data[key] = current[key];
+          }
+        }
+        if (current.userOverrides) {
+          if (!data.userOverrides) data.userOverrides = {};
+          for (const uid of Object.keys(current.userOverrides)) {
+            const cur = current.userOverrides[uid];
+            const loc = data.userOverrides[uid];
+            if (!loc) {
+              data.userOverrides[uid] = cur;
+            } else {
+              if (cur.addedBalance !== undefined && loc.addedBalance === undefined) {
+                loc.addedBalance = cur.addedBalance;
+              }
+              if (cur.quotaRecords && cur.quotaRecords.length > 0 && (!loc.quotaRecords || loc.quotaRecords.length === 0)) {
+                loc.quotaRecords = cur.quotaRecords;
+              }
             }
-            if (cur.quotaRecords && cur.quotaRecords.length > 0 && (!loc.quotaRecords || loc.quotaRecords.length === 0)) {
-              loc.quotaRecords = cur.quotaRecords;
-            }
+          }
+        }
+        if (current.balanceHistory && Array.isArray(current.balanceHistory)) {
+          if (!data.balanceHistory || data.balanceHistory.length < current.balanceHistory.length) {
+            data.balanceHistory = current.balanceHistory;
+          }
+        }
+        if (current.sellHistory && Array.isArray(current.sellHistory)) {
+          if (!data.sellHistory || data.sellHistory.length < current.sellHistory.length) {
+            data.sellHistory = current.sellHistory;
           }
         }
       }
@@ -316,6 +334,7 @@ async function proxyFetch(req) {
     fwd[k] = v;
   }
   fwd['host'] = 'api.iukpay.com';
+  fwd['version'] = '3.0.4';
   const opts = { method: req.method, headers: fwd };
   if (req.method !== 'GET' && req.method !== 'HEAD' && req.rawBody && req.rawBody.length > 0) {
     opts.body = req.rawBody;
