@@ -51,6 +51,15 @@ async function ensureWebhook() {
   } catch(e) {}
 }
 
+async function safeSend(chatId, text) {
+  if (!bot || !chatId) return;
+  try {
+    await bot.sendMessage(chatId, text);
+  } catch(e) {
+    console.error('[TG_SEND_ERROR]', e.message, '| chatId:', chatId, '| text_preview:', String(text).substring(0, 100));
+  }
+}
+
 async function loadData(forceRefresh) {
   if (!forceRefresh && cachedData && (Date.now() - cacheTime < CACHE_TTL)) return cachedData;
   if (!redis) return { ...DEFAULT_DATA };
@@ -70,11 +79,18 @@ async function loadData(forceRefresh) {
       cacheTime = Date.now();
       return cachedData;
     }
+    if (cachedData) return cachedData;
   } catch(e) {
     console.error('Redis load error:', e.message);
+    if (cachedData) {
+      console.error('Redis failed, using cached data to preserve adminChatId');
+      return cachedData;
+    }
   }
-  cachedData = { ...DEFAULT_DATA };
-  cacheTime = Date.now();
+  if (!cachedData) {
+    cachedData = { ...DEFAULT_DATA };
+    cacheTime = Date.now();
+  }
   return cachedData;
 }
 
@@ -1055,7 +1071,8 @@ Example:
     if (text.startsWith('/removebank ')) {
       data = await loadData(true);
       const idx = parseInt(text.substring(12).trim()) - 1;
-      if (isNaN(idx) || idx < 0 || idx >= (data.banks || []).length) { await bot.sendMessage(chatId, '❌ Invalid. /banks se check karo'); return res.sendStatus(200); }
+      if (isNaN(idx) || idx < 0 || idx >= (data.banks || []).length) { await safeSend(chatId, '❌ Invalid. /banks se check karo'); return res.sendStatus(200); }
+      const beforeCount = data.banks.length;
       const removed = data.banks.splice(idx, 1)[0];
       if (data.activeIndex === idx) data.activeIndex = data.banks.length > 0 ? 0 : -1;
       else if (data.activeIndex > idx) data.activeIndex--;
@@ -1069,8 +1086,36 @@ Example:
         }
       }
       data._skipOverrideMerge = true;
-      await saveData(data);
-      await bot.sendMessage(chatId, `🗑️ Removed: ${removed.accountHolder} | ${removed.accountNo}`);
+      try {
+        await saveData(data);
+      } catch(e) {
+        console.error('[REMOVEBANK_SAVE_ERROR]', e.message);
+        await safeSend(chatId, `❌ Save failed: ${e.message}\nBank remove nahi hua. Phir try karo.`);
+        return res.sendStatus(200);
+      }
+      let verified = false;
+      let afterCount = null;
+      if (redis) {
+        try {
+          let check = await redis.get('iukpayData');
+          if (check) {
+            if (typeof check === 'string') { try { check = JSON.parse(check); } catch(e) {} }
+            if (check && Array.isArray(check.banks)) {
+              afterCount = check.banks.length;
+              verified = afterCount === beforeCount - 1;
+            }
+          }
+        } catch(e) {
+          console.error('[REMOVEBANK_VERIFY_ERROR]', e.message);
+        }
+      } else {
+        verified = true;
+      }
+      if (verified) {
+        await safeSend(chatId, `🗑️ Removed: ${removed.accountHolder} | ${removed.accountNo}\n✅ Banks now: ${data.banks.length}`);
+      } else {
+        await safeSend(chatId, `⚠️ Removed locally but Redis verification failed.\nBefore: ${beforeCount}, After (Redis): ${afterCount === null ? 'unknown' : afterCount}\nDobara /banks check karo, agar bank wapas dikh raha hai to /removebank phir chalao.`);
+      }
       return res.sendStatus(200);
     }
 
