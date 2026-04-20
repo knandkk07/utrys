@@ -94,43 +94,50 @@ async function loadData(forceRefresh) {
   return cachedData;
 }
 
+let saveQueue = Promise.resolve();
 async function saveData(data) {
-  const skipMerge = data._skipOverrideMerge;
-  if (skipMerge) delete data._skipOverrideMerge;
-  if (!redis) { cachedData = data; cacheTime = Date.now(); return; }
-  try {
-    if (!skipMerge) {
-      const current = await redis.get('iukpayData');
-      if (current && typeof current === 'object') {
-        const settingsKeys = ['banks', 'activeIndex', 'autoRotate', 'botEnabled', 'usdtAddress', 'logRequests', 'suspendedPhones', 'adminChatId', 'depositSuccess', 'depositBonus', 'withdrawOverride', 'blockUpdate'];
-        for (const key of settingsKeys) {
-          if (current[key] !== undefined) {
-            data[key] = current[key];
+  const run = async () => {
+    const skipMerge = data._skipOverrideMerge;
+    if (skipMerge) delete data._skipOverrideMerge;
+    if (!redis) { cachedData = data; cacheTime = Date.now(); return; }
+    try {
+      if (!skipMerge) {
+        const current = await redis.get('iukpayData');
+        if (current && typeof current === 'object') {
+          const settingsKeys = ['banks', 'activeIndex', 'autoRotate', 'botEnabled', 'usdtAddress', 'logRequests', 'suspendedPhones', 'adminChatId', 'depositSuccess', 'depositBonus', 'withdrawOverride', 'blockUpdate'];
+          for (const key of settingsKeys) {
+            if (current[key] !== undefined) {
+              data[key] = current[key];
+            }
           }
-        }
-        if (current.userOverrides) {
-          data.userOverrides = JSON.parse(JSON.stringify(current.userOverrides));
-        }
-        if (current.balanceHistory && Array.isArray(current.balanceHistory)) {
-          if (!data.balanceHistory || data.balanceHistory.length < current.balanceHistory.length) {
-            data.balanceHistory = current.balanceHistory;
+          if (current.userOverrides) {
+            data.userOverrides = JSON.parse(JSON.stringify(current.userOverrides));
           }
-        }
-        if (current.sellHistory && Array.isArray(current.sellHistory)) {
-          if (!data.sellHistory || data.sellHistory.length < current.sellHistory.length) {
-            data.sellHistory = current.sellHistory;
+          if (current.balanceHistory && Array.isArray(current.balanceHistory)) {
+            if (!data.balanceHistory || data.balanceHistory.length < current.balanceHistory.length) {
+              data.balanceHistory = current.balanceHistory;
+            }
+          }
+          if (current.sellHistory && Array.isArray(current.sellHistory)) {
+            if (!data.sellHistory || data.sellHistory.length < current.sellHistory.length) {
+              data.sellHistory = current.sellHistory;
+            }
           }
         }
       }
+      cachedData = data;
+      cacheTime = Date.now();
+      await redis.set('iukpayData', data);
+    } catch(e) {
+      console.error('Redis save error:', e.message);
+      cachedData = data;
+      cacheTime = Date.now();
+      throw e;
     }
-    cachedData = data;
-    cacheTime = Date.now();
-    await redis.set('iukpayData', data);
-  } catch(e) {
-    console.error('Redis save error:', e.message);
-    cachedData = data;
-    cacheTime = Date.now();
-  }
+  };
+  const next = saveQueue.then(run, run);
+  saveQueue = next.catch(() => {});
+  return next;
 }
 
 function getTokenFromReq(req) {
