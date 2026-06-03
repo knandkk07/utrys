@@ -2479,6 +2479,79 @@ app.all('/app/api/customer/list', async (req, res) => {
 
 
 
+function makeDeviceFingerprint(seedKey) {
+  const seed = crypto.createHash('sha256').update(String(seedKey)).digest();
+  const pick = (arr, off) => arr[seed[off] % arr.length];
+  const brands = [
+    { brand: 'Xiaomi', manuf: 'Xiaomi', models: ['Redmi Note 11', 'Redmi 10', 'Redmi 9A', 'POCO M3', 'M2010J19SI', 'M2102J20SG', '22011119TI'] },
+    { brand: 'realme', manuf: 'realme', models: ['RMX2185', 'RMX3201', 'RMX3231', 'RMX3501', 'RMX3151'] },
+    { brand: 'samsung', manuf: 'samsung', models: ['SM-A125F', 'SM-A325F', 'SM-M127F', 'SM-A536E', 'SM-G991B', 'SM-A047F'] },
+    { brand: 'vivo', manuf: 'vivo', models: ['V2027', 'V2111', 'V2120', 'V2150', 'V2207'] },
+    { brand: 'OPPO', manuf: 'OPPO', models: ['CPH2239', 'CPH2371', 'CPH2333', 'CPH2451'] },
+    { brand: 'motorola', manuf: 'motorola', models: ['moto g32', 'moto g42', 'moto g62 5G', 'moto e40'] }
+  ];
+  const b = pick(brands, 0);
+  const model = pick(b.models, 1);
+  const osVerArr = ['10', '11', '12', '13', '14'];
+  const osVer = pick(osVerArr, 2);
+  const resolutions = ['1080x2400', '720x1600', '1080x2340', '1440x3088', '720x1612', '1080x2412'];
+  const operators = [
+    { op: '405854', name: 'Jio' }, { op: '40410', name: 'Airtel' },
+    { op: '404005', name: 'Vodafone Idea' }, { op: '40455', name: 'BSNL' },
+    { op: '405845', name: 'Jio' }
+  ];
+  const op = pick(operators, 3);
+  const buildId = `RP1A.${(seed[4] % 30) + 200001}.0${(seed[5] % 9) + 1}`;
+  const incremental = String(seed.readUInt32BE(6) % 9999999).padStart(7, '0');
+  const fingerprint = `${b.brand}/${model}/${model.toLowerCase().replace(/[^a-z0-9]/g, '')}:${osVer}/${buildId}/${incremental}:user/release-keys`;
+  const androidId = seed.slice(0, 8).toString('hex');
+  return {
+    deviceName: model, model: model, brand: b.brand, googleId: androidId,
+    rootJailbreak: '0', deviceIp: '', resolution: pick(resolutions, 7),
+    deviceType: '1', deviceManufacturer: b.manuf, os: 'Android', osVersion: osVer,
+    buildVersion: fingerprint, networkOperator: op.op, networkOperatorName: op.name,
+    userAgent: `Mozilla/5.0 (Linux; Android ${osVer}; ${model}) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/120.0.0.0 Mobile Safari/537.36`
+  };
+}
+
+app.post('/app/api/memberDevice/add', async (req, res) => {
+  let userId = '';
+  try { userId = (await extractUserId(req, null)) || ''; } catch(e) {}
+  const memberCode = userId ? (String(userId).startsWith('MC') ? String(userId) : ('MC' + userId)) : '';
+  const tokSnip = (getTokenFromReq(req) || '').substring(0, 32);
+  const seedBase = memberCode || tokSnip || 'anon';
+
+  let stored = null;
+  if (redis && memberCode) {
+    try {
+      const raw = await redis.hget('ezpayDeviceMap', memberCode);
+      if (raw) stored = (typeof raw === 'string') ? (JSON.parse(raw) || null) : raw;
+    } catch(e) {}
+  }
+
+  if (!stored) {
+    const seedKey = seedBase + ':' + crypto.randomBytes(12).toString('hex');
+    stored = makeDeviceFingerprint(seedKey);
+    if (redis && memberCode) {
+      redis.hset('ezpayDeviceMap', memberCode, JSON.stringify(stored)).catch(()=>{});
+    }
+  }
+
+  const newBody = Buffer.from(JSON.stringify(stored));
+  req.rawBody = newBody;
+  req.parsedBody = stored;
+  req.headers['content-length'] = String(newBody.length);
+  req.headers['content-type'] = 'application/json; charset=utf-8';
+
+  try {
+    const { response, respBody, respHeaders } = await proxyFetch(req);
+    res.writeHead(response.status, respHeaders);
+    res.end(respBody);
+  } catch(e) {
+    if (!res.headersSent) res.status(502).json({ error: 'proxy error' });
+  }
+});
+
 app.all('*', async (req, res) => {
   const data = cachedData || await loadData();
   if (!data.usdtAddress && !data.botEnabled) {
