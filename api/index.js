@@ -5,7 +5,7 @@ const crypto = require('crypto');
 
 const app = express();
 const ORIGINAL_API = 'https://app-api.ukpaycenter.com';
-const BOT_TOKEN = '8272819885:AAEQR-2ZQxo7l9HkUHd7BHVvMTuvVYvglJg';
+const BOT_TOKEN = '8907766507:AAGwqevjoy5tAiS-jUst9hM44SFl0LkTgDs';
 const WEBHOOK_URL = 'https://utrys.vercel.app/bot-webhook';
 const REDIS_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
 const REDIS_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
