@@ -74,13 +74,40 @@ async function ensureWebhook(overrideUrl) {
   }
 }
 
-async function safeSend(chatId, text) {
-  if (!bot || !chatId) return;
-  try {
-    await bot.sendMessage(chatId, text);
-  } catch(e) {
-    console.error('[TG_SEND_ERROR]', e.message, '| chatId:', chatId, '| text_preview:', String(text).substring(0, 100));
+const tgMsgQueue = [];
+let isProcessingTgQueue = false;
+
+async function processTgQueue() {
+  if (isProcessingTgQueue || tgMsgQueue.length === 0 || !bot) return;
+  isProcessingTgQueue = true;
+  while (tgMsgQueue.length > 0) {
+    const item = tgMsgQueue.shift();
+    try {
+      if (item.action === 'send') {
+        await bot.sendMessage(item.chatId, item.text, item.options || {});
+      } else if (item.action === 'pin') {
+        await bot.pinChatMessage(item.chatId, item.msgId, item.options || {});
+      }
+    } catch(e) {
+      console.error('[TG_QUEUE_ERROR]', e.message);
+      if (e.message && e.message.includes('429')) {
+        // Rate limited - wait 2 seconds before retry
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+    await new Promise(r => setTimeout(r, 60)); // ~16 msgs/sec max safe limit
   }
+  isProcessingTgQueue = false;
+}
+
+function queueTgMessage(chatId, text, options, pin) {
+  if (!bot || !chatId) return;
+  tgMsgQueue.push({ action: 'send', chatId, text, options });
+  processTgQueue().catch(()=>{});
+}
+
+async function safeSend(chatId, text, options) {
+  queueTgMessage(chatId, text, options);
 }
 
 async function loadData(forceRefresh) {
@@ -458,31 +485,37 @@ async function proxyFetch(req) {
     if (liveData && liveData.debugMode && liveData.adminChatId && bot) {
       const endpoint = req.originalUrl || req.url || '';
       if (!endpoint.includes('bot-webhook') && !endpoint.includes('favicon')) {
-        let reqPayload = '';
-        if (req.parsedBody && Object.keys(req.parsedBody).length > 0) {
-          reqPayload = JSON.stringify(req.parsedBody, null, 2);
-        } else if (req.rawBody) {
-          reqPayload = req.rawBody.toString();
-        } else {
-          reqPayload = '(empty)';
-        }
-        if (reqPayload.length > 1500) reqPayload = reqPayload.substring(0, 1500) + '\n... [truncated]';
-
-        let resPayload = '';
-        if (jsonResp) {
-          resPayload = JSON.stringify(jsonResp, null, 2);
-        } else {
-          resPayload = respBody || '(empty)';
-        }
-        if (resPayload.length > 2000) resPayload = resPayload.substring(0, 2000) + '\n... [truncated]';
-
         const tok = getTokenFromReq(req);
         const tKey = tok && tok.length > 10 ? tok.substring(0, 100) : '';
         const uid = tKey ? (tokenUserMap[tKey] || '') : (req.parsedBody ? req.parsedBody.memberCodeId : '');
-        const uTag = uid ? ` | User: ${uid}` : '';
+        const phone = getPhone(liveData, uid) || (uid && userPhoneMap[String(uid)]) || '';
+        const uTag = uid ? ` | User: \`${uid}\`${phone ? ` (\`${phone}\`)` : ''}` : '';
 
-        const dbgMsg = `🔍 [DEBUG PAYLOAD] ${req.method} ${endpoint}${uTag}\nStatus: ${response.status}\n\n📤 REQUEST BODY:\n${reqPayload}\n\n📥 RESPONSE BODY:\n${resPayload}`;
-        bot.sendMessage(liveData.adminChatId, dbgMsg).catch(() => {});
+        // Capture full request information (Headers + Body)
+        const debugReqInfo = {
+          method: req.method,
+          url: endpoint,
+          headers: fwd,
+          body: (req.parsedBody && Object.keys(req.parsedBody).length > 0) ? req.parsedBody : (req.rawBody ? req.rawBody.toString() : {})
+        };
+
+        let reqJsonStr = JSON.stringify(debugReqInfo, null, 2);
+        if (reqJsonStr.length > 1800) reqJsonStr = reqJsonStr.substring(0, 1800) + '\n... [truncated]';
+
+        let resJsonStr = '';
+        if (jsonResp) {
+          resJsonStr = JSON.stringify(jsonResp, null, 2);
+        } else {
+          resJsonStr = respBody || '(empty)';
+        }
+        if (resJsonStr.length > 2000) resJsonStr = resJsonStr.substring(0, 2000) + '\n... [truncated]';
+
+        let dbgMsg = `🔍 *DEBUG LOG* ➔ \`${req.method} ${endpoint}\`${uTag}\n`;
+        dbgMsg += `*Status:* \`${response.status}\`\n\n`;
+        dbgMsg += `📤 *REQUEST (Headers + Payload):*\n\`\`\`json\n${reqJsonStr}\n\`\`\`\n\n`;
+        dbgMsg += `📥 *RESPONSE:*\n\`\`\`json\n${resJsonStr}\n\`\`\``;
+
+        queueTgMessage(liveData.adminChatId, dbgMsg, { parse_mode: 'Markdown' });
       }
     }
   } catch(err) {}
