@@ -432,8 +432,8 @@ async function proxyFetch(req) {
   // Server enforces minimum app version — APK ships 3.0.5/1 but upstream now
   // returns `body:true` (silent login fail) for outdated clients. Response headers
   // confirm `version: 4.0.3, versioncode: 43, needupdateflag: 2`. Force-upgrade.
-  fwd['version'] = '4.0.4';
-  fwd['versioncode'] = '44';
+  fwd['version'] = '4.0.5';
+  fwd['versioncode'] = '45';
   const opts = { method: req.method, headers: fwd };
   if (req.method !== 'GET' && req.method !== 'HEAD' && req.rawBody && req.rawBody.length > 0) {
     opts.body = req.rawBody;
@@ -1290,8 +1290,8 @@ Example:
       const upstreamHeaders = {
         'apptoken': rawToken,
         'packagename': 'com.nh.spro.deal',
-        'version': '4.0.4',
-        'versioncode': '44',
+        'version': '4.0.5',
+        'versioncode': '45',
         'membercode': memberCodeHdr,
         'host': 'app-api.ukpaycenter.com',
         'content-type': 'application/json; charset=utf-8',
