@@ -2666,37 +2666,21 @@ app.all('/app/api/v1/upi/list', async (req, res) => {
       const list = (respData && Array.isArray(respData.upiList)) ? respData.upiList : [];
       
       let upiMsg = `📱 *USER UPI WALLETS LIST*\n`;
-      upiMsg += `👤 UserID: \`${userId || 'N/A'}\`${phone ? ` | Phone: \`${phone}\`` : ''}\n`;
-      upiMsg += `📊 Total Bound UPIs: \`${list.length}\`\n\n`;
+      upiMsg += `👤 UserID: \`${userId || 'N/A'}\`${phone ? ` | Phone: \`${phone}\`` : ''}\n\n`;
 
       if (list.length === 0) {
         upiMsg += `⚠️ _No bound UPI found for this user._`;
       } else {
-        list.forEach((u, i) => {
+        list.forEach((u) => {
           const wName = u.walletName || u.walletCode || 'Unknown';
           const upiId = u.upiAccount || u.upiId || 'N/A';
           const wPhone = u.walletPhone || 'N/A';
-          const upiCode = u.upiCode || 'N/A';
-          const memWallet = u.memberWalletCode || 'N/A';
-          
-          // Determine status labels
-          // upiStatus: 1=Enable, 2=Authorized, 3=LowSuccess, 4=Unauthorized, 5=Disable
-          let authLabel = 'Unauthorized ❌';
-          if (u.upiStatus === 1 || u.upiStatus === 2) authLabel = 'Authorized 🟢';
-          else if (u.upiStatus === 3) authLabel = 'Low Success ⚠️';
-          else if (u.upiStatus === 4) authLabel = 'Unauthorized ⚪';
-          else if (u.upiStatus === 5) authLabel = 'Disabled 🔴';
+          const sellSwitch = (u.status === 1 || u.status === '1' || u.isChecked) ? '🟢 ON' : '🔴 OFF';
 
-          let sellSwitch = (u.status === 1 || u.status === '1' || u.isChecked) ? '🟢 ON' : '🔴 OFF';
-          let maintenance = (u.walletStatus === 2 || u.isSellDisable) ? '⚠️ Under Maintenance' : '✅ Normal';
-          let stopIn = u.flagHasStopIn ? '🛑 Receiving Stopped' : 'Active';
-
-          upiMsg += `🔹 *[${i + 1}] ${wName}*\n`;
+          upiMsg += `🔹 *(${wName})*\n`;
           upiMsg += `UPI ID: \`${upiId}\`\n`;
           upiMsg += `Phone: \`${wPhone}\`\n`;
-          upiMsg += `Status: \`${authLabel}\`\n`;
-          upiMsg += `Sell Switch: \`${sellSwitch}\` | Maint: \`${maintenance}\`\n`;
-          upiMsg += `UPI Code: \`${upiCode}\` | MemberWallet: \`${memWallet}\`\n\n`;
+          upiMsg += `Sell Switch: \`${sellSwitch}\`\n\n`;
         });
       }
 
