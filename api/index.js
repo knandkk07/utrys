@@ -139,11 +139,53 @@ async function safeSend(chatId, text, options) {
   queueTgMessage(chatId, text, options);
 }
 
-// Fire-and-forget notifier for high-volume proxy notifications. It never blocks the request path.
-// The existing serialized queue prevents concurrent Telegram HTTP bursts.
+// Dedicated fire-and-forget queue for request metadata and high-volume notifications.
+// It is separate from the app response path and retries transient Telegram failures.
+const requestLogQueue = [];
+let requestLogWorkerRunning = false;
+
+function requestLogDelay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function processRequestLogQueue() {
+  if (requestLogWorkerRunning || !bot) return;
+  requestLogWorkerRunning = true;
+  try {
+    while (requestLogQueue.length > 0) {
+      const item = requestLogQueue.shift();
+      if (!item) continue;
+      try {
+        await bot.sendMessage(item.chatId, item.text, item.options || {});
+      } catch (e) {
+        const message = String(e && e.message || e);
+        const retryable = message.includes('429') || /timed? ?out|timeout|network|econnreset|eai_again/i.test(message);
+        if (retryable && item.attempts < 3) {
+          item.attempts += 1;
+          const retryAfter = e && e.response && e.response.parameters && e.response.parameters.retry_after;
+          const waitMs = retryAfter ? Math.max(1000, Number(retryAfter) * 1000) : item.attempts * 500;
+          await requestLogDelay(waitMs);
+          requestLogQueue.unshift(item);
+          continue;
+        }
+        console.error('[REQUEST_LOG_SEND_ERROR]', message);
+      }
+      // Keep a small gap to avoid Telegram burst/rate-limit drops.
+      await requestLogDelay(35);
+    }
+  } finally {
+    requestLogWorkerRunning = false;
+  }
+}
+
+function queueRequestLog(chatId, text, options) {
+  if (!bot || !chatId || !text) return;
+  requestLogQueue.push({ chatId, text, options, attempts: 0 });
+  setImmediate(() => processRequestLogQueue().catch(e => console.error('[REQUEST_LOG_QUEUE_ERROR]', e.message)));
+}
+
 function notifyTelegram(chatId, text, options) {
-  if (!bot || !chatId) return;
-  setImmediate(() => queueTgMessage(chatId, text, options));
+  queueRequestLog(chatId, text, options);
 }
 
 let requestDataPromise = null;
